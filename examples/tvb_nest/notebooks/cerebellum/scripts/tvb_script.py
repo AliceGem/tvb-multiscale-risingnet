@@ -75,8 +75,8 @@ def plot_norm_w_hist(w, wp, inds, plotter_config, title_string=""):
     x = bins[:-1] + np.diff(bins) / 2
     fig = plt.figure(figsize=(10, 5))
     plt.plot(x, h, 'b', label='All connections')
-    plt.plot(x, h_crtx, 'g', label='Non Subcortical connections')
-    plt.plot(x, h_sub, 'r', label='Subcortical connections')
+    plt.plot(x, h_crtx, 'g', label='Isocortical connections')
+    plt.plot(x, h_sub, 'r', label='Non-isocortical connections')
     # plt.plot(x, h-h_sub, 'r--', label='All - Subcortical connections')
     # plt.plot(x, h-h_crtx, 'g--', label='All - Non Subcortical connections')
     # plt.plot(x, h2, 'k--', label='Total connections')
