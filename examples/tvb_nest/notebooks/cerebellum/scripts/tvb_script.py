@@ -20,7 +20,7 @@ def load_connectome(config, plotter=None):
     major_structs_labels = np.load(config.MAJOR_STRUCTS_LABELS_FILE)
     voxel_count = np.load(config.VOXEL_COUNT_FILE)
     inds = np.load(config.INDS_FILE, allow_pickle=True).item()
-    if plotter:
+    if config.VERBOSE > 1:
         print("major_structs_labels:\n", np.unique(major_structs_labels))
         print("ROI inds:\n", inds)
 
@@ -32,6 +32,7 @@ def construct_extra_inds_and_maps(connectome, inds):
     region_labels = connectome['region_labels']
     inds["subcrtx"] = np.arange(len(region_labels)).astype('i')
     inds["subcrtx"] = np.delete(inds["subcrtx"], inds["crtx"])
+    inds['crtx_and_subcrtx'] = np.sort(np.concatenate([inds['crtx'], inds["subcrtx"]]))
     maps["is_subcortical"] = np.array([False] * region_labels.shape[0]).astype("bool")
     maps["is_subcortical"][inds["subcrtx"]] = True
     maps["is_cortical"] = np.array([False] * region_labels.shape[0]).astype("bool")
@@ -45,9 +46,9 @@ def construct_extra_inds_and_maps(connectome, inds):
     return inds, maps
 
 
-def plot_norm_w_hist(w, wp, inds):
+def plot_norm_w_hist(w, wp, inds, plotter_config, title_string=""):
     h = w[wp].flatten()
-    print('number of all connections > 0: %d' % h.size)
+    # print('number of all connections > 0: %d' % h.size)
     h, bins = np.histogram(h, range=(1.0, 31), bins=100)
 
     w_within_sub = w[inds["subcrtx_not_thalspec"][:, None], inds["subcrtx_not_thalspec"][None, :]]
@@ -57,19 +58,19 @@ def plot_norm_w_hist(w, wp, inds):
                      w_from_sub.flatten().tolist() +
                      w_to_sub.flatten().tolist())
     h_sub = h_sub[h_sub > 0].flatten()
-    print('number of h_sub > 0: %d' % h_sub.size)
+    # print('number of h_sub > 0: %d' % h_sub.size)
     h_sub, bins_sub = np.histogram(h_sub, range=(1.0, 31), bins=100)
     assert np.all(bins == bins_sub)
 
     h_crtx = np.array(w[inds["not_subcrtx_not_thalspec"][:, None],
                         inds["not_subcrtx_not_thalspec"][None, :]].flatten().tolist())
     h_crtx = h_crtx[h_crtx > 0]
-    print('number of h_crtx > 0: %d' % h_crtx.size)
+    # print('number of h_crtx > 0: %d' % h_crtx.size)
     h_crtx, bins_crtx = np.histogram(h_crtx, range=(1.0, 31), bins=100)
     assert np.all(bins == bins_crtx)
 
     h2 = h_crtx + h_sub
-    print('number of total > 0: %d' % np.sum(h2))
+    # print('number of total > 0: %d' % np.sum(h2))
 
     x = bins[:-1] + np.diff(bins) / 2
     fig = plt.figure(figsize=(10, 5))
@@ -79,31 +80,51 @@ def plot_norm_w_hist(w, wp, inds):
     # plt.plot(x, h-h_sub, 'r--', label='All - Subcortical connections')
     # plt.plot(x, h-h_crtx, 'g--', label='All - Non Subcortical connections')
     # plt.plot(x, h2, 'k--', label='Total connections')
-    plt.title("Histogram of logtransformed connectome weights")
+    plt.title("Histogram of %s connectome weights" % title_string)
     plt.legend()
     plt.ylim([0.0, h.max()])
     plt.tight_layout()
+    plt.savefig(os.path.join(plotter_config.FOLDER_FIGURES, "%sWeightsHistogram.png" % title_string))
+    fig.show()
     return fig
 
 
-def logprocess_weights(connectome, inds, print_flag=True, plotter=None):
+def logprocess_weights(connectome, inds, verbose=1, plotter=None):
     w = connectome['weights'].copy()
     w[np.isnan(w)] = 0.0  # zero nans
     w0 = w <= 0  # zero weights
     wp = w > 0  # positive weights
+    if plotter:
+        print("\nPlotting weights' histogram...")
+        plot_norm_w_hist(w, wp, inds, plotter.config)
     w /= w[wp].min()  # divide by the minimum to have a minimum of 1.0
     w *= np.exp(1)  # multiply by e to have a minimum of e
     w[wp] = np.log(w[wp])  # log positive values
     w[w0] = 0.0  # zero zero values (redundant)
     connectome['weights'] = w
-    if print_flag:
+    if verbose > 1:
         print('\nnormalized weights [min, max] = \n', [w[wp].min(), w[wp].max()])
     if plotter:
-        plot_norm_w_hist(w, wp, inds)
+        print("\nPlotting logtransformed weights' histogram...")
+        plot_norm_w_hist(w, wp, inds, plotter.config, title_string="logtransformed ")
     return connectome
 
 
-def build_connectivity(connectome, inds, config, print_flag=True, plotter=None):
+def prepare_connectome(config, plotter=None):
+    # Load connectome and other structural files
+    connectome, major_structs_labels, voxel_count, inds = load_connectome(config, plotter=plotter)
+    # Construct some more indices and maps
+    inds, maps = construct_extra_inds_and_maps(connectome, inds)
+    if config.CONN_LOG:
+        if config.VERBOSE:
+            print("Logtransforming connectivity weights!")
+        # Logprocess connectome
+        connectome = logprocess_weights(connectome, inds, verbose=config.VERBOSE, plotter=plotter)
+    # Prepare connectivity with all possible normalizations
+    return connectome, major_structs_labels, voxel_count, inds, maps
+
+
+def build_connectivity(connectome, inds, config):
     from tvb.datatypes.connectivity import Connectivity
 
     connectivity = Connectivity(**connectome)
@@ -117,10 +138,16 @@ def build_connectivity(connectome, inds, config, print_flag=True, plotter=None):
     # Normalize connectivity weights
     connectivity.weights[np.logical_or(np.isnan(connectivity.weights), np.isinf(connectivity.weights))] = 0.0
     if config.CONN_SCALE:
+        if config.VERBOSE:
+            print("Scaling connectivity weights with %s!" % config.CONN_SCALE)
         connectivity.weights = connectivity.scaled_weights(mode=config.CONN_SCALE)
     if config.CONN_NORM_PERCENTILE:
+        if config.VERBOSE:
+            print("Normalizing connectivity weights with %g percentile!" % config.CONN_NORM_PERCENTILE)
         connectivity.weights /= np.percentile(connectivity.weights, config.CONN_NORM_PERCENTILE)
     if config.CONN_CEIL:
+        if config.VERBOSE:
+            print("Ceiling connectivity to %g!" % config.CONN_CEIL)
         connectivity.weights[connectivity.weights > config.CONN_CEIL] = config.CONN_CEIL
 
     connectivity.speed = np.array([config.CONN_SPEED])
@@ -128,10 +155,6 @@ def build_connectivity(connectome, inds, config, print_flag=True, plotter=None):
                                             connectivity.tract_lengths)
 
     connectivity.configure()
-
-    if plotter:
-        # Plot TVB connectome:
-        plotter.plot_tvb_connectivity(connectivity);
 
     # Remove connections between specific thalami and the rest of the subcortex:
     connectivity.weights[inds["subcrtx_not_thalspec"][:, None], inds["thalspec"][None, :]] = 0.0
@@ -166,6 +189,9 @@ def build_model(number_of_regions, inds, maps, config):
     from tvb_multiscale.core.tvb.cosimulator.models.wc_thalamocortical_cereb import WilsonCowanThalamoCortical
 
     dummy = np.ones((number_of_regions,))
+
+    if config.VERBOSE:
+        print("Configuring model with parameters:\n%s" % str(config.model_params))
 
     STIMULUS = config.model_params.pop("STIMULUS", None)
 
@@ -272,14 +298,13 @@ def fic(param, p_orig, weights, trg_inds=None, src_inds=None, FIC=1.0, dummy=Non
     return p
 
 
-def prepare_fic(simulator, inds, FIC, G, print_flag=True, plotter=None):
+def prepare_fic(simulator, inds, FIC, G, plotter=None):
     # Optimize w_ie and w_rs according to total indegree and G
     if FIC and G > 0.0:
-
         # Indices of cortical and subcortical regions excluding specific thalami
         inds["non_thalamic"] = np.unique(inds['crtx'].tolist() + inds["subcrtx_not_thalspec"].tolist())
 
-        # FIC for cortical w_ie against indegree for all incoming connections exluding the ones from specific thalami
+        # FIC for cortical w_ie against indegree for all incoming connections excluding the ones from specific thalami
         simulator.model.w_ie = fic("w_ie", simulator.model.w_ie, simulator.connectivity.weights,
                                    inds["crtx"], inds["non_thalamic"],
                                    FIC=FIC, dummy=None, subtitle=" for cortex", plotter=plotter)
@@ -303,7 +328,7 @@ def prepare_fic(simulator, inds, FIC, G, print_flag=True, plotter=None):
         return simulator
 
 
-def build_simulator(connectivity, model, inds, maps, config, print_flag=True, plotter=None):
+def build_simulator(connectivity, model, inds, maps, config, plotter=None):
     from tvb_multiscale.core.tvb.cosimulator.cosimulator_serial import CoSimulatorSerial
     from tvb_multiscale.core.tvb.cosimulator.models.wc_thalamocortical_cereb import SigmoidalPreThalamoCortical
     from tvb.simulator.monitors import Raw, Bold, TemporalAverage
@@ -319,6 +344,8 @@ def build_simulator(connectivity, model, inds, maps, config, print_flag=True, pl
     if config.THAL_CRTX_FIX:
 
         if "w" in config.THAL_CRTX_FIX:
+            if config.VERBOSE:
+                print("Fixing thalamocortical weights!")
             # Fix structural connectivity (specific) thalamo-cortical weights to 1,
             # such that all thalamo-cortical weights are equal to the parameters
             # w_er, w_es, w_se, w_si
@@ -326,6 +353,8 @@ def build_simulator(connectivity, model, inds, maps, config, print_flag=True, pl
             simulator.connectivity.weights[inds["thalspec"], inds["crtx"]] = 1.0
 
         if "d" in config.THAL_CRTX_FIX:
+            if config.VERBOSE:
+                print("Fixing thalamocortical delays!")
             # Fix structural connectivity (specific) thalamo-cortical tracts length to a value,
             # such that all thalamo-cortical delays are equal to the parameter tau_ct,
             # given connectivity's speed.
@@ -377,13 +406,24 @@ def build_simulator(connectivity, model, inds, maps, config, print_flag=True, pl
     simulator.integrator.noise.nsig = np.array(
         [config.DEFAULT_NSIG] * (simulator.model.nvar - 1) + [0.0])  # No Noise for state variabla A for BOLD monitor
 
-    # Set initial conditions around zero
-    simulator.initial_conditions = 0.1 * np.random.normal(size=(1000, simulator.model.nvar,
-                                                                connectivity.number_of_regions, 1))
+    # Set initial conditions around baseline currents of each kind of population for a shorter transient:
+    simulator.initial_conditions = np.zeros((1000, simulator.model.nvar, connectivity.number_of_regions, 1))
+    n_crtx_subcrtx = len(inds['crtx_and_subcrtx'])
+    simulator.initial_conditions[:, [[0]], inds['crtx_and_subcrtx']] =\
+        simulator.model.I_e.mean().item() + 0.1 * np.random.normal(size=(1000, 1, n_crtx_subcrtx, 1))
+    simulator.initial_conditions[:, [[1]], inds['crtx_and_subcrtx']] = \
+        simulator.model.I_i.mean().item() + 0.1 * np.random.normal(size=(1000, 1, n_crtx_subcrtx, 1))
+    n_thalspec = len(inds['thalspec'])
+    simulator.initial_conditions[:, [[0]], inds['thalspec']] = \
+        simulator.model.I_s.mean().item() + 0.1 * np.random.normal(size=(1000, 1, n_thalspec, 1))
+    simulator.initial_conditions[:, [[1]], inds['thalspec']] = \
+        simulator.model.I_r.mean().item() + 0.1 * np.random.normal(size=(1000, 1, n_thalspec, 1))
 
     if config.FIC:
+        if config.VERBOSE:
+            print("Applying FIC!")
         # We will modify the w_ie and w_rs parameters a bit based on indegree and G:
-        simulator = prepare_fic(simulator, inds, config.FIC, simulator.model.G[0], print_flag, plotter)
+        simulator = prepare_fic(simulator, inds, config.FIC, simulator.model.G[0], plotter)
         # We will not run FIC though when fitting...
         # simulator.initial_conditions[:, -1, maps['is_thalamic'], :] = simulator.model.w_rs[
         #     None, maps['is_thalamic'], None]
@@ -407,8 +447,8 @@ def build_simulator(connectivity, model, inds, maps, config, print_flag=True, pl
 
     simulator.integrate_next_step = simulator.integrator.integrate_with_update
 
-    if print_flag:
-        simulator.print_summary_info_details(recursive=1)
+    if config.VERBOSE > 1:
+        simulator.print_summary_info_details(recursive=config.VERBOSE)
 
     # Serializing TVB cosimulator is necessary for parallel cosimulation:
     from tvb_multiscale.core.utils.file_utils import dump_pickled_dict
@@ -418,6 +458,10 @@ def build_simulator(connectivity, model, inds, maps, config, print_flag=True, pl
 
     # Dumping the serialized TVB cosimulator to a file will be necessary for parallel cosimulation.
     dump_pickled_dict(sim_serial, sim_serial_filepath)
+
+    if plotter:
+        # Plot TVB connectome:
+        plotter.plot_tvb_connectivity(simulator.connectivity);
 
     return simulator
 
@@ -430,12 +474,12 @@ def configure_simulation_length_with_transient(config):
     return simulation_length, transient
 
 
-def simulate(simulator, config, print_flag=True):
+def simulate(simulator, config):
     simulator.simulation_length, transient = configure_simulation_length_with_transient(config)
     # Simulate and return results
     tic = time.time()
     results = simulator.run()
-    if print_flag:
+    if config.VERBOSE:
         print("\nSimulated in %f secs!" % (time.time() - tic))
     return results, transient
 
@@ -493,7 +537,7 @@ def compute_data_PSDs(raw_results, PSD_target, inds, transient=None, write_files
     # Compute Power Spectrum
     f, Pxx_den = welch(data, fs, nperseg=nperseg)
 
-    print(Pxx_den.shape)
+    # print(Pxx_den.shape)
 
     # Compute spectrum interpolation...
     interp = interp1d(f, Pxx_den, kind='linear', axis=1,
@@ -525,23 +569,24 @@ def compute_data_PSDs(raw_results, PSD_target, inds, transient=None, write_files
         axes[1].set_xlabel('Frequency (Hz)')
         axes[1].set_ylabel('log(PS)')
 
-    if write_files:
-        np.save
+    # if write_files:
+    #     np.save
     return Pxx_den.flatten()
 
 
 def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
-    config = assert_config(config)
+    config = assert_config(config, return_plotter=False)
 
-    if write_files:
-        # If you want to see what the function above does, take the steps, one by one
-        try:
-            # We need framework_tvb for writing and reading from HDF5 files
-            from tvb_multiscale.core.tvb.io.h5_writer import H5Writer
-            writer = H5Writer()
-        except:
-            writer = False
+    writer = False
+    # if write_files:
+    #     # If you want to see what the function above does, take the steps, one by one
+    #     try:
+    #         # We need framework_tvb for writing and reading from HDF5 files
+    #         from tvb_multiscale.core.tvb.io.h5_writer import H5Writer
+    #         writer = H5Writer()
+    #     except:
+    #         warning("H5Writer cannot be imported! Probably you haven't installed tvb_framework.")
 
     from tvb.contrib.scripts.datatypes.time_series import TimeSeriesRegion
     from tvb.contrib.scripts.datatypes.time_series_xarray import TimeSeriesRegion as TimeSeriesXarray
@@ -561,6 +606,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             labels_dimensions={"State Variable": list(simulator.model.variables_of_interest),
                                "Region": simulator.connectivity.region_labels.tolist()},
             sample_period=simulator.integrator.dt)
+
         source_ts.configure()
 
         outputs.append(source_ts)
@@ -572,7 +618,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(source_ts._data,
                                                                             connectivity=source_ts.connectivity),
                                    os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
-        print("Raw ts:\n%s" % str(source_ts))
+        # print("Raw ts:\n%s" % str(source_ts))
 
         if len(results) > 1:
             bold_ts = TimeSeriesXarray(  # substitute with TimeSeriesRegion fot TVB like functionality
@@ -592,7 +638,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
                 writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(bold_ts._data,
                                                                                 connectivity=bold_ts.connectivity),
                                        os.path.join(config.out.FOLDER_RES, bold_ts.title) + ".h5")
-            print("BOLD ts:\n%s" % str(bold_ts))
+            # print("BOLD ts:\n%s" % str(bold_ts))
 
     return tuple(outputs)
 
@@ -600,10 +646,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 def plot_tvb(transient, inds,
              results=None, source_ts=None, bold_ts=None, PSD_target=None, PSD=None,
              simulator=None, plotter=None, config=None, write_files=True):
-    config = assert_config(config)
-    if plotter is None:
-        from tvb_multiscale.core.plot.plotter import Plotter
-        plotter = Plotter(config.figures)
+    config, plotter = assert_config(config, return_plotter=True)
     MAX_VARS_IN_COLS = 2
     MAX_REGIONS_IN_ROWS = 10
     MIN_REGIONS_FOR_RASTER_PLOT = 9
@@ -723,38 +766,38 @@ def plot_tvb(transient, inds,
         plt.savefig(os.path.join(config.figures.FOLDER_FIGURES, "SummaryTimeSeries." + config.figures.FIG_FORMAT))
 
 
-def run_workflow(G=5.0, STIMULUS=0.25,
-                 I_E=-0.25, I_S=0.25,
-                 W_IE=-3.0, W_RS=-2.0,
-                 #TAU_E=10/0.9, TAU_I=10/0.9, TAU_S=10/0.25, TAU_R=10/0.25,
-                 PSD_target=None, plot_flag=True, output_folder=None):
+def run_workflow(PSD_target=None, model_params={}, config=None, **config_args):
     # Get configuration
-    config, plotter = configure(G, STIMULUS, I_E, I_S, W_IE, W_RS,
-                                #TAU_E, TAU_I, TAU_S, TAU_R,
-                                plot_flag=plot_flag, output_folder=output_folder)
-    # Load connectome and other structural files
-    connectome, major_structs_labels, voxel_count, inds = load_connectome(config, plotter=plotter)
-    # Construct some more indices and maps
-    inds, maps = construct_extra_inds_and_maps(connectome, inds)
-    # Logprocess connectome
-    connectome = logprocess_weights(connectome, inds, print_flag=True, plotter=plotter)
-    # Prepare connectivity with all possible normalizations
-    connectivity = build_connectivity(connectome, inds, config, print_flag=True, plotter=plotter)
+    config, plotter = assert_config(config, return_plotter=True, **config_args)
+    config.model_params.update(model_params)
+    # Load and prepare connectome and connectivity with all possible normalizations:
+    connectome, major_structs_labels, voxel_count, inds, maps = prepare_connectome(config, plotter=plotter)
+    connectivity = build_connectivity(connectome, inds, config)
     # Prepare model
     model = build_model(connectivity.number_of_regions, inds, maps, config)
     # Prepare simulator
-    simulator = build_simulator(connectivity, model, inds, maps, config, print_flag=True, plotter=plotter)
+    simulator = build_simulator(connectivity, model, inds, maps, config, plotter=plotter)
     # Run simulation and get results
-    results, transient = simulate(simulator, config, print_flag=True)
+    results, transient = simulate(simulator, config)
     if PSD_target is None:
         # This is the PSD target we are trying to fit:
         PSD_target = compute_target_PSDs(config, write_files=True, plotter=plotter)
     # This is the PSD computed from our simulation results.
     PSD = compute_data_PSDs(results[0], PSD_target, inds, transient, plotter=plotter)
-    if plot_flag:
+    if config_args.get('plot_flag', True):
         plot_tvb(transient, inds, results=results,
                  source_ts=None, bold_ts=None, PSD_target=PSD_target, PSD=PSD,
                  simulator=simulator, plotter=plotter, config=config, write_files=True)
         return PSD, results, simulator, config
     else:
         return PSD, results
+
+
+if __name__ == "__main__":
+    parser = args_parser("tvb_script")
+    args, parser_args, parser = parse_args(parser, def_args=DEFAULT_ARGS)
+    verbose = args.get('verbose', DEFAULT_ARGS['verbose'])
+    if verbose:
+        print("Running %s with arguments:\n" % parser.description)
+        print(args, "\n")
+    run_workflow(**args)
