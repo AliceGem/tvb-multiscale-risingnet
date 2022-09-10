@@ -92,22 +92,22 @@ def write_batch_sim_res_to_file_per_iG(sim_res, iB, iG, config=None):
 def simulate_TVB_for_sbi_batch(iB, iG=None, config=None, write_to_file=True):
     config = assert_config(config, return_plotter=False)
     # Get the default values for the parameter except for G
-    params = OrderedDict()
-    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, config.model_params.values()):
-        params[pname] = pval
     batch_samples = load_priors_samples_per_batch_per_iG(iB, iG, config)
     n_simulations = batch_samples.shape[0]
     sim_res = []
     for iS in range(n_simulations):
-        priors_params = params.copy()
+        priors_params = OrderedDict()
         if iG is not None:
             priors_params["G"] = config.Gs[iG]
-        for prior, prior_name in zip(batch_samples[iS], config.PRIORS_PARAMS_NAMES):
+        for prior_name, prior in zip(config.PRIORS_PARAMS_NAMES, batch_samples[iS]):
             try:
                 numpy_prior = prior.numpy()
             except:
                 numpy_prior = prior
-            priors_params[prior_name] = numpy_prior
+            if prior_name == "FIC":
+                config.FIC = numpy_prior
+            else:
+                priors_params[prior_name] = numpy_prior
         if config.VERBOSE:
             print("\n\nSimulation %d/%d for iG=%d, iB=%d" % (iS+1, n_simulations, iG, iB))
             print("Simulating for parameters:\n%s" % str(priors_params))
@@ -291,14 +291,18 @@ def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_pa
     if iR is None:
         iR = -1
 
-    # Get the default values for the parameter except for G
-    params = OrderedDict()
-    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, config.model_params.values()):
-        params[pname] = pval
-    params.update(dict(zip(config.PRIORS_PARAMS_NAMES, samples_fit['mean'][iR])))
-
     # Get G for this run:
     G = samples_fit['G']  # config.Gs[iG]
+
+    # Get the default values for the parameter except for G
+    params = dict(config.model_params)
+    params['G'] = G
+    # Set the posterior means of the parameters:
+    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, samples_fit['mean'][iR]):
+        if pname == "FIC":
+            config.FIC = pval
+        else:
+            params[pname] = pval
 
     # Run one simulation with the posterior means:
     if config.VERBOSE:
@@ -306,7 +310,6 @@ def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_pa
         print("params =\n", params)
     if workflow_fun is None:
         workflow_fun = run_workflow
-    params['G'] = G
     # Specify other parameters or overwrite some:
     params.update(model_params)
     outputs = workflow_fun(plot_flag=True, model_params=params, config=config, output_folder="G_%g" % params['G'])
@@ -343,7 +346,7 @@ if __name__ == "__main__":
         sim_res = simulate_TVB_for_sbi_batch(parser_args.iB, iG, config=config, write_to_file=True)
     elif parser_args.script_id == 1:
         if iG == -1:
-            raise ValueError("iG=-1 is not posible for running sbi_infer_for_iG!")
+            raise ValueError("iG=-1 is not possible for running sbi_infer_for_iG!")
         samples_fit_Gs, results, fig, simulator, output_config = sbi_infer_for_iG(iG, config)
     else:
         raise ValueError("Input argument script_id=%s is neither 0 for simulate_TVB_for_sbi_batch "
