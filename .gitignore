@@ -115,3 +115,6 @@ outputs/logs
 /examples/tvb_nest/notebooks/reduced_wong_wang_exc_io_inh_i/simulator_loop.png
 /docs/VirtualCourse_2020-01-07/outputs/
 /docs/VirtualCourse_2021-01-07/outputs/
+examples/data/cerebellum/PS_popa2013/PSD_Popa.png
+/examples/tvb_nest/notebooks/cerebellum/outputs/
+/examples/tvb_nest/notebooks/cerebellum/scripts/outputs/
