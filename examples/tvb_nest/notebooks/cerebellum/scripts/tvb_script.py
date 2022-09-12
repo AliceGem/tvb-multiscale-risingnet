@@ -4,6 +4,7 @@ from scipy.signal import welch
 from scipy.interpolate import interp1d
 
 from examples.tvb_nest.notebooks.cerebellum.scripts.base import *
+from tvb_multiscale.core.utils.file_utils import dump_pickled_dict
 
 
 def load_connectome(config, plotter=None):
@@ -267,9 +268,9 @@ def fic(param, p_orig, weights, trg_inds=None, src_inds=None, FIC=1.0, dummy=Non
     # FICindegree = (indegree - indegree_min) / indegree_std
     indegree = weights[trg_inds][:, src_inds].sum(axis=1)
     FICindegree = (indegree - indegree.min()) / np.std(indegree)
-    # p_fic = p * (1 - FIC * FICindegree) = p * (1 + FIC * (indegree - indegree_min) / indegree_std)
-    # assuming p < 0.0
-    p[trg_inds] = pscalar * (1 + FIC * FICindegree)
+    # p_fic = p - FIC * FICindegree = p - FIC * (indegree - indegree_min) / indegree_std
+    # assuming p < 0.0, and FIC >= 0.0
+    p[trg_inds] = pscalar - FIC * FICindegree
 
     try:
         assert np.all(np.argsort(indegree) == np.argsort(-p[trg_inds]))  # the orderings should reverse
@@ -449,7 +450,6 @@ def build_simulator(connectivity, model, inds, maps, config, plotter=None):
         simulator.print_summary_info_details(recursive=config.VERBOSE)
 
     # Serializing TVB cosimulator is necessary for parallel cosimulation:
-    from tvb_multiscale.core.utils.file_utils import dump_pickled_dict
     from tvb_multiscale.core.tvb.cosimulator.cosimulator_serialization import serialize_tvb_cosimulator
     sim_serial_filepath = os.path.join(config.out.FOLDER_RES, "tvb_serial_cosimulator.pkl")
     sim_serial = serialize_tvb_cosimulator(simulator)
@@ -572,11 +572,22 @@ def compute_data_PSDs(raw_results, PSD_target, inds, transient=None, write_files
     return Pxx_den.flatten()
 
 
+def dump_picked_time_series(time_series, filepath):
+    dump_pickled_dict({"time_series": time_series.data[:, :, :, 0],
+                       "dimensions_labels": np.array(time_series.labels_ordering)[:-1],
+                       "time": time_series.time, "time_unit": time_series.time_unit,
+                       "sampling_period": time_series.sample_period,
+                       "state_variables": np.array(time_series.variables_labels),
+                       "region_labels": np.array(time_series.space_labels)},
+                      filepath)
+    return filepath
+
+
 def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
     config = assert_config(config, return_plotter=False)
 
-    writer = False
+    # writer = False
     # if write_files:
     #     # If you want to see what the function above does, take the steps, one by one
     #     try:
@@ -607,16 +618,22 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
         source_ts.configure()
 
+        if write_files:
+            if config.VERBOSE:
+                print("Pickle-dumping source_ts to %s!" % config.SOURCE_TS_PATH)
+            dump_picked_time_series(source_ts, config.SOURCE_TS_PATH)
+
+        # # Write to file
+        # if writer:
+        #     writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(source_ts._data,
+        #                                                                     connectivity=source_ts.connectivity),
+        #                            os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
+        if config.VERBOSE > 1:
+            print("Raw ts:\n%s" % str(source_ts))
+
         outputs.append(source_ts)
 
         # t = source_ts.time
-
-        # Write to file
-        if writer:
-            writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(source_ts._data,
-                                                                            connectivity=source_ts.connectivity),
-                                   os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
-        # print("Raw ts:\n%s" % str(source_ts))
 
         if len(results) > 1:
             bold_ts = TimeSeriesXarray(  # substitute with TimeSeriesRegion fot TVB like functionality

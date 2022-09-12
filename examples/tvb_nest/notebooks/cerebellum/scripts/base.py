@@ -109,6 +109,7 @@ def configure(**ARGS):
     config.TRANSIENT_RATIO = 0.4        # At least 4 seconds of transient recommended!    #1.0
     config.NEST_PERIPHERY = False
     config.INVERSE_SIGMOIDAL_NEST_TO_TVB = True
+    config.SOURCE_TS_PATH = os.path.join(config.out.FOLDER_RES, "source_ts.pkl")
 
     # Connectivity
     config.CONN_SPEED = 3.0
@@ -170,17 +171,17 @@ def configure(**ARGS):
     #                 STIMULUS,  I_e,   I_s,  w_ie,   w_rs,      FIC     tau_e,  tau_i,   tau_s,   tau_r
     # Uniform priors:
     config.prior_min = [0.0,     -1.0,  -0.5, -10.0,   -5.0]  #   0.0,    1.0,    1.0,    1.0,     1.0]
-    config.prior_max = [1.0,      0.0,  0.5,    0.0,    0.0]  #   5.0,   20.0,   20.0,   80.0,     80.0]
+    config.prior_max = [1.0,      0.0,  0.5,    0.0,    0.0]  #   25.0,   20.0,   20.0,   80.0,     80.0]
     # Normal priors:
-    config.prior_loc = [0.25,    -0.5,  0.25,  -5.0,  -2.5]  # ,  2.0,    10/0.9,  10/0.9, 10/0.25, 10/0.25]
-    config.prior_sc = [0.1,      0.25,  0.25,   2.5,  1.25]  # ,  0.5,     2.0,     2.0,    4.0,      4.0]
+    config.prior_loc = [0.25,    -0.5,  0.25,  -5.0,  -2.5]  # ,  10.0,    10/0.9,  10/0.9, 10/0.25, 10/0.25]
+    config.prior_sc = [0.1,      0.25,  0.25,   2.5,  1.25]  # ,  5.0,     2.0,     2.0,    4.0,      4.0]
     if config.FIC == "fit":
         config.FIC = 1.0
         config.PRIORS_PARAMS_NAMES.append("FIC")
         config.prior_min.append(0.0)
-        config.prior_max.append(5.0)
-        config.prior_loc.append(2.0)
-        config.prior_sc.append(0.5)
+        config.prior_max.append(25.0)
+        config.prior_loc.append(10.0)
+        config.prior_sc.append(5.0)
     config.n_priors = len(config.prior_min)
 
     if config.VERBOSE:
