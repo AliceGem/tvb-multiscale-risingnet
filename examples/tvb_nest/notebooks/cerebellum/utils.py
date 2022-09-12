@@ -137,12 +137,13 @@ def only_plot_selected_spectra_coherence_and_diff(freq, avg_coherence, color, fm
         
     axes[0].set_ylim(yranges[0])
     axes[0].set_title('M1-S1 coherence spectra during virtual whisking')
-    axes[0].legend(avg_coherence.keys())
+    axes[0].legend(['mean-field cerebellum ON','cerebellar inactivation (OFF)','spiking cerebellum ON (cosim)'])
     axes[1].set_ylim(yranges[1])
     axes[1].set_title('change in M1-S1 coherence after virtual cerebellar inactivation')
-    axes[1].legend(['OFF-ON cosim','OFF-ON MF'])
+    axes[1].legend(['OFF-ON spiking','OFF-ON mean-field'])
 
     plt.show()
+    return fig
 
 
 def compute_plot_ica(data, time, variable="BOLD", n_components=10, plotter=None):
