@@ -253,7 +253,7 @@ def run_tvb_nest_workflow(PSD_target=None, config=None, model_params={}, **confi
     from examples.tvb_nest.notebooks.cerebellum.scripts.nest_script import build_NEST_network, plot_nest_results
 
     # Get configuration
-    config, plotter = assert_config(config, return_plotter=True, **config_args)
+    config, plotter = assert_config(config, **config_args)
     config.model_params.update(model_params)
     # config.SIMULATION_LENGTH = 100.0
     # Load and prepare connectome and connectivity with all possible normalizations:
