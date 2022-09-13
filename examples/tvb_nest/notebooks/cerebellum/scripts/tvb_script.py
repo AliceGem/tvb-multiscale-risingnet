@@ -791,6 +791,29 @@ def run_workflow(PSD_target=None, model_params={}, config=None, **config_args):
     # Load and prepare connectome and connectivity with all possible normalizations:
     connectome, major_structs_labels, voxel_count, inds, maps = prepare_connectome(config, plotter=plotter)
     connectivity = build_connectivity(connectome, inds, config)
+    ## switch cereb OFF
+    reg1='Left Cerebellar Cortex'
+    reg2='Left Cerebellar Nuclei'
+    reg3='Left Ansiform lobule'
+    reg4='Left Interposed nucleus'
+    reg5='Right Cerebellar Cortex'
+    reg6='Right Cerebellar Nuclei'
+    reg7='Right Ansiform lobule'
+    reg8='Right Interposed nucleus'
+    # find the indices in region labels of these strings
+    iR1 = np.where([reg1 in reg for reg in connectivity.region_labels])[0]
+    iR2 = np.where([reg2 in reg for reg in connectivity.region_labels])[0]
+    iR3 = np.where([reg3 in reg for reg in connectivity.region_labels])[0]
+    iR4 = np.where([reg4 in reg for reg in connectivity.region_labels])[0]
+    iR5 = np.where([reg5 in reg for reg in connectivity.region_labels])[0]
+    iR6 = np.where([reg6 in reg for reg in connectivity.region_labels])[0]
+    iR7 = np.where([reg7 in reg for reg in connectivity.region_labels])[0]
+    iR8 = np.where([reg8 in reg for reg in connectivity.region_labels])[0]
+    for i in [iR1, iR2, iR3, iR4, iR5, iR6, iR7, iR8]:
+       connectivity.weights[i,:]=0
+       connectivity.weights[:,i]=0
+    ######## end of cereb switch off  
+    
     # Prepare model
     model = build_model(connectivity.number_of_regions, inds, maps, config)
     # Prepare simulator
