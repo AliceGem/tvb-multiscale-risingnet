@@ -786,7 +786,7 @@ def plot_tvb(transient, inds,
 
 def run_workflow(PSD_target=None, model_params={}, config=None, **config_args):
     # Get configuration
-    config, plotter = assert_config(config, return_plotter=True, **config_args)
+    config, plotter = assert_config(config, **config_args)
     config.model_params.update(model_params)
     # Load and prepare connectome and connectivity with all possible normalizations:
     connectome, major_structs_labels, voxel_count, inds, maps = prepare_connectome(config, plotter=plotter)
