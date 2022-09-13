@@ -619,9 +619,12 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
         source_ts.configure()
 
         if write_files:
+            import pickle
             if config.VERBOSE:
                 print("Pickle-dumping source_ts to %s!" % config.SOURCE_TS_PATH)
-            dump_picked_time_series(source_ts, config.SOURCE_TS_PATH)
+            #dump_picked_time_series(source_ts, config.SOURCE_TS_PATH)
+            with open(config.SOURCE_TS_PATH, 'wb') as handle:
+                pickle.dump(source_ts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # # Write to file
         # if writer:
