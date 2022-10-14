@@ -600,11 +600,26 @@ def plot_nest_results(nest_network, neuron_models, neuron_number, config):
     fig_raster.update_xaxes(range=[0, config.SIMULATION_LENGTH * 1.1])
     fig_psth.update_layout(showlegend=False)
     fig_raster.update_layout(showlegend=False)
-    fig_psth.show()
-    fig_raster.show()
-    # TODO: Find a way to write figures without kaleido!!!
-    # fig_psth.write_image("images/snn_psth_whisking.svg")
-    # fig_raster.write_image("images/snn_raster_whisking.svg")
+    if config.figures.SAVE_FLAG:
+        try:
+            fig_psth.write_image(os.path.join(config.figures.FOLDER_FIGURES, "NESTpsth.%s" % config.figures.FIG_FORMAT))
+            fig_raster.write_image(os.path.join(config.figures.FOLDER_FIGURES, "NESTraster.%s" % config.figures.FIG_FORMAT))
+        except Exception as e:
+            warnings.warn("Failed to write_image for plotly figures with error:\n" % str(e))
+    if config.figures.SHOW_FLAG:
+        fig_psth.show()
+        fig_raster.show()
+    else:
+        # TODO: find a better way to delete plotly figures
+        # The current one is taken from here: https://community.plotly.com/t/remove-all-traces/13469
+        # There might not be a better one yet...: https://github.com/plotly/plotly.py/issues/2725
+        fig_psth.data = []
+        fig_raster.data = []
+        fig_psth.layout = {}
+        fig_raster.layout = {}
+        fig_psth = None
+        fig_raster = None
+    return fig_psth, fig_raster
 
 
 def simulate_nest_network(nest_network, config, neuron_models={}, neuron_number={}):
@@ -618,11 +633,15 @@ def simulate_nest_network(nest_network, config, neuron_models={}, neuron_number=
     return nest_network
 
 
-def run_nest_workflow(PSD_target=None, config=None, model_params={}, **config_args):
-    # Get configuration
-    config_args['plot_flag'] = False  # because it is too slow...
+def run_nest_workflow(PSD_target=None, model_params={}, config=None, **config_args):
+    tic = time.time()
+    plot_flag = config_args.get('plot_flag', DEFAULT_ARGS.get('plot_flag'))
     config, plotter = assert_config(config, return_plotter=True, **config_args)
     config.model_params.update(model_params)
+    if config.VERBOSE:
+        print("\n\n------------------------------------------------\n\n"+
+              "Running NEST workflow for plot_flag=%s, \nand model_params=\n%s...\n" 
+              % (str(plot_flag), str(config.model_params)))
     with open(os.path.join(config.out.FOLDER_RES, 'config.pkl'), 'wb') as file:
         dill.dump(config, file, recurse=1)
     # Load and prepare connectome and connectivity with all possible normalizations:
@@ -637,9 +656,11 @@ def run_nest_workflow(PSD_target=None, config=None, model_params={}, **config_ar
     # Simulate the NEST network
     nest_network = simulate_nest_network(nest_network, config, neuron_models, neuron_number)
     # Plot results
-    if config_args.get('plot_flag', True):
+    if plotter is not None:
         plot_nest_results(nest_network, neuron_models, neuron_number, config)
-    return nest_network
+    if config.VERBOSE:
+        print("\nFinished NEST workflow in %g sec!\n" % (time.time() - tic))
+    return nest_network, simulator, config
 
 
 if __name__ == "__main__":

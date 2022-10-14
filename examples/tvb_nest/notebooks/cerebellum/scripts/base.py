@@ -20,22 +20,20 @@ TvbProfile.set_profile(TvbProfile.LIBRARY_PROFILE)
 from tvb.simulator.integrators import EulerStochastic
 
 
-DEFAULT_ARGS = {'G': 2.0, 'STIMULUS': 0.5,
-                'I_e': -0.25, 'I_s': 0.25,
+DEFAULT_ARGS = {'G': 1.0, 'STIMULUS': 0.5,
+                'I_e': -0.35, 'I_s': 0.08,
                 'w_ie': -3.0, 'w_rs': -2.0,
                 'CONN_LOG': True, 'FIC': 'fit', 'PRIORS_DIST': 'uniform',
-                'output_folder': '', 'verbose': 1, 'return_plotter': True}
-# tau_e=10/0.9, tau_i=10/0.9, tau_s=10/0.25, tau_r=10/0.25,
+                'output_folder': 'cwc_STIM_Is', 'verbose': 1, 'plot_flag': True}
 
 
 def create_plotter(config):
     from tvb_multiscale.core.plot.plotter import Plotter
-    plotter = Plotter(config.figures)
     config.figures.SHOW_FLAG = True
     config.figures.SAVE_FLAG = True
     config.figures.FIG_FORMAT = 'png'
     config.figures.DEFAULT_SIZE = config.figures.NOTEBOOK_SIZE
-    return config, plotter
+    return config, Plotter(config.figures)
 
 
 def configure(**ARGS):
@@ -66,9 +64,11 @@ def configure(**ARGS):
     inds_filepath = os.path.join(data_path, INDS_FILE)
     popa_freqs_path = os.path.join(data_path, 'PS_popa2013')
     cereb_scaffold_path = os.path.join(data_path, 'balanced_DCN_IO.hdf5')
-    outputs_path = os.path.join(work_path, "outputs/cwc")
+    outputs_path = os.path.join(work_path, "outputs")
     if len(args['output_folder']):
         outputs_path = os.path.join(outputs_path, args['output_folder'])
+    else:
+        outputs_path = os.path.join(outputs_path, "cwc")
     # # outputs_path += '_G%g' % G
     # # if STIMULUS:
     # #     outputs_path += "_Stim%g" % STIMULUS
@@ -91,7 +91,7 @@ def configure(**ARGS):
 
     config.VERBOSE = args['verbose']
 
-    if args['return_plotter']:
+    if args['plot_flag']:
         config, plotter = create_plotter(config)
     else:
         plotter = None
@@ -105,8 +105,8 @@ def configure(**ARGS):
     config.DEFAULT_INTEGRATOR = config.DEFAULT_STOCHASTIC_INTEGRATOR
 
     # Simulation...
-    config.SIMULATION_LENGTH = 10000.0  #4000.0
-    config.TRANSIENT_RATIO = 0.4        # At least 4 seconds of transient recommended!    #1.0
+    config.SIMULATION_LENGTH = 2**12 + 1.0 # 10: 1025, 11: 2049.0, 12: 4097.0
+    config.TRANSIENT_RATIO = 0.25
     config.NEST_PERIPHERY = False
     config.INVERSE_SIGMOIDAL_NEST_TO_TVB = True
     config.SOURCE_TS_PATH = os.path.join(config.out.FOLDER_RES, "source_ts.pkl")
@@ -126,8 +126,7 @@ def configure(**ARGS):
     config.CONN_CEIL = False
 
     # Model parameters
-
-    config.STIMULUS_RATE = 6.0  # Hz
+    config.STIMULUS_RATE = 8.0  # Hz
 
     config.model_params = OrderedDict()
     config.model_params['G'] = args['G']
@@ -152,8 +151,9 @@ def configure(**ARGS):
     config.SBI_NUM_WORKERS = 1
     config.SBI_METHOD = 'SNPE'
     config.TARGET_PSD_POPA_PATH = popa_freqs_path
-    config.PSD_TARGET_PATH = os.path.join(config.TARGET_PSD_POPA_PATH, "PSD_target.npy")
+    config.PSD_TARGET_PATH = os.path.join(config.out.FOLDER_RES, "PSD_target.npy")
     config.TARGET_FREQS = np.arange(5.0, 48.0, 1.0)
+    config.POSTERIOR_PATH = os.path.join(config.out.FOLDER_RES, "posterior.pkl")
     config.POSTERIOR_SAMPLES_PATH = os.path.join(config.out.FOLDER_RES, "samples_fit.npy")
     config.N_FIT_RUNS = 10  # 3 - 10
     config.N_SIMULATIONS = 1000
@@ -164,26 +164,35 @@ def configure(**ARGS):
     config.BATCH_FILE_FORMAT_G = "%s_iG%02d_%03d%s"
     config.BATCH_PRIORS_SAMPLES_FILE = "bps.pt"  # bps_iG01_iB010.pt
     config.BATCH_SIM_RES_FILE = "bsr.npy"  # bsr_iG01_iB010.npy
-    config.Gs = np.array([0.1, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0])
+    config.Gs = np.array([0.1, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]) 
     config.PRIORS_DIST = args['PRIORS_DIST']  # "normal" or "uniform"
-    config.PRIORS_PARAMS_NAMES = ['STIMULUS', 'I_e', 'I_s', 'w_ie', 'w_rs']  # 'FIC', 'tau_e', 'tau_i', 'tau_s', 'tau_r']
-    #                    0.       1.     2.     3.      4.       5.        6.       7.        8.    9.0
-    #                 STIMULUS,  I_e,   I_s,  w_ie,   w_rs,      FIC     tau_e,  tau_i,   tau_s,   tau_r
-    # Uniform priors:
-    config.prior_min = [0.0,     -1.0,  -0.5, -10.0,   -5.0]  #   0.0,    1.0,    1.0,    1.0,     1.0]
-    config.prior_max = [1.0,      0.0,  0.5,    0.0,    0.0]  #   25.0,   20.0,   20.0,   80.0,     80.0]
-    # Normal priors:
-    config.prior_loc = [0.25,    -0.5,  0.25,  -5.0,  -2.5]  # ,  10.0,    10/0.9,  10/0.9, 10/0.25, 10/0.25]
-    config.prior_sc = [0.1,      0.25,  0.25,   2.5,  1.25]  # ,  5.0,     2.0,     2.0,    4.0,      4.0]
+    config.PRIORS_DEF = \
+        {"STIMULUS": {"min": 0.0, "max": 1.0, "loc": 0.5, "sc": 0.1},
+         "I_e": {"min": -1.0, "max": 0.0, "loc": -0.35, "sc": 0.1},
+         "I_s": {"min": -0.1, "max": 0.1, "loc": 0.0, "sc": 0.025},
+         "w_ie": {"min": -10.0, "max": 0.0, "loc": -5.0, "sc": 2.5},
+         "w_rs": {"min": -4.0, "max": 0.0, "loc": -2.0, "sc": 0.5},
+         "FIC": {"min": 0.0, "max": 25.0, "loc": 10.0, "sc": 5.0},
+        }
+    config.PRIORS_PARAMS_NAMES = ['STIMULUS', 'I_s']  # , 'I_e', 'w_rs', 'FIC',
     if config.FIC == "fit":
         config.FIC = 1.0
         config.PRIORS_PARAMS_NAMES.append("FIC")
-        config.prior_min.append(0.0)
-        config.prior_max.append(25.0)
-        config.prior_loc.append(10.0)
-        config.prior_sc.append(5.0)
-    config.n_priors = len(config.prior_min)
-
+    # Uniform priors:
+    config.prior_min = []
+    config.prior_max = []  
+    # Normal priors:
+    config.prior_loc = []  
+    config.prior_sc = []
+    for pname in config.PRIORS_PARAMS_NAMES:
+        config.prior_min.append(config.PRIORS_DEF[pname]['min'])
+        config.prior_max.append(config.PRIORS_DEF[pname]['max'])
+        config.prior_loc.append(config.PRIORS_DEF[pname]['loc'])
+        config.prior_sc.append(config.PRIORS_DEF[pname]['sc'])
+    config.n_priors = len(config.PRIORS_PARAMS_NAMES)
+    config.SBI_FIT_PLOT_PATH = os.path.join(config.figures.FOLDER_FIGURES, "sbi_fit.%s" % config.figures.FIG_FORMAT)
+    config.OPT_RES_MODE = "map"  # or "mean"
+    
     if config.VERBOSE:
         print(config)
 
@@ -197,12 +206,15 @@ def assert_config(config=None, return_plotter=False, **config_args):
     if config is None:
         if return_plotter:
             # Create a configuration if one is not given
-            return configure(plot_flag=True, **config_args)
+            return configure(**config_args)
         else:
-            return configure(plot_flag=False, **config_args)[0]
+            return configure(**config_args)[0]
     else:
         if return_plotter:
-            return create_plotter(config)
+            if config_args.get('plot_flag', DEFAULT_ARGS.get('plot_flag')):
+                return create_plotter(config)
+            else:
+                return config, None
         else:
             return config
 
@@ -226,7 +238,7 @@ def args_parser(funname, args=DEFAULT_ARGS):
                  'output_folder': ['o', str, 'Output folder name'],
                  'verbose': ['v', int,
                              'Integer flag to print output messages (when > 0) or not (when == 0). Default = 1.0'],
-                 'return_plotter': ['plot', bool, 'Boolean flag to plot or not']
+                 'plot_flag': ['pf', bool, 'Boolean flag to plot or not']
                  }
     parser = argparse.ArgumentParser(description='%s.py' % funname)
     for arg, vals in arguments.items():

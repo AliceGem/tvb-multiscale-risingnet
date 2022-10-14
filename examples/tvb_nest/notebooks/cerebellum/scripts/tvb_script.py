@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import warnings
 from scipy.signal import welch
 from scipy.interpolate import interp1d
 
@@ -7,7 +8,7 @@ from examples.tvb_nest.notebooks.cerebellum.scripts.base import *
 from tvb_multiscale.core.utils.file_utils import dump_pickled_dict
 
 
-def load_connectome(config, plotter=None):
+def load_connectome(config):
     import h5py
     connectome = {}
     f = h5py.File(config.BRAIN_CONN_FILE)
@@ -85,8 +86,12 @@ def plot_norm_w_hist(w, wp, inds, plotter_config, title_string=""):
     plt.legend()
     plt.ylim([0.0, h.max()])
     plt.tight_layout()
-    plt.savefig(os.path.join(plotter_config.FOLDER_FIGURES, "%sWeightsHistogram.png" % title_string))
-    fig.show()
+    if plotter_config.SAVE_FLAG:
+        plt.savefig(os.path.join(plotter_config.FOLDER_FIGURES, "%sWeightsHistogram.png" % title_string))
+    if plotter_config.SHOW_FLAG:
+        fig.show()
+    else:
+        plt.close(fig)
     return fig
 
 
@@ -111,7 +116,7 @@ def logprocess_weights(connectome, inds, verbose=1, plotter=None):
 
 def prepare_connectome(config, plotter=None):
     # Load connectome and other structural files
-    connectome, major_structs_labels, voxel_count, inds = load_connectome(config, plotter=plotter)
+    connectome, major_structs_labels, voxel_count, inds = load_connectome(config)
     # Construct some more indices and maps
     inds, maps = construct_extra_inds_and_maps(connectome, inds)
     if config.CONN_LOG:
@@ -158,13 +163,13 @@ def build_connectivity(connectome, inds, config):
     # Remove connections between specific thalami and the rest of the subcortex:
     connectivity.weights[inds["subcrtx_not_thalspec"][:, None], inds["thalspec"][None, :]] = 0.0
     # Retain connections
-    # from spinal nucleus of the trigeminal to S1 barrel field:
+    # from spinal nucleus of the trigeminal to S1 barrel field specific thalamus:
     w_s1brlthal_trigeminal = connectivity.weights[inds["s1brlthal"], inds["trigeminal"]].copy()
     # from interposed nucleus to M1:
-    w_m1thal_cerebnuclei = connectivity.weights[inds["m1thal"], inds["trigeminal"]].copy()
+    w_m1thal_cerebnuclei = connectivity.weights[inds["m1thal"], inds["interposed"]].copy()
     connectivity.weights[inds["thalspec"][:, None], inds["subcrtx_not_thalspec"][None, :]] = 0.0
     connectivity.weights[inds["s1brlthal"], inds["trigeminal"]] = w_s1brlthal_trigeminal
-    connectivity.weights[inds["m1thal"], inds["trigeminal"]] = w_m1thal_cerebnuclei
+    connectivity.weights[inds["m1thal"], inds["interposed"]] = w_m1thal_cerebnuclei
 
     # Homogenize crtx <-> subcrtx connnectivity
     # connectivity.weights[inds["crtx"][:, None], inds["subcrtx_not_thalspec"][None, :]] *= 0.0 # 0.0 # 0.02
@@ -205,12 +210,16 @@ def build_model(number_of_regions, inds, maps, config):
             model_params[p] = pval
 
     if STIMULUS:
-        # Stimulus to M1 and S1 barrel field
-        # inds_stim = np.concatenate((inds["motor"][:2], inds["sens"][-2:])
-        if config.NEST_PERIPHERY:
-            inds_stim = np.array(inds["facial"])
+        if model_params.get("G", WilsonCowanThalamoCortical.G.default)[0].item() > 0.0:
+            # Stimulus to M1 and S1 barrel field
+            # inds_stim = np.concatenate((inds["motor"][:2], inds["sens"][-2:])
+            if config.NEST_PERIPHERY:
+                inds_stim = np.array(inds["facial"])
+            else:
+                inds_stim = np.concatenate((inds["facial"], inds["trigeminal"]))
         else:
-            inds_stim = np.concatenate((inds["facial"], inds["trigeminal"]))
+            # Stimulus to directly to all specific thalami:
+            inds_stim = inds['thalspec']
         # Stimuli:
         A_st = 0 * dummy.astype("f")
         f_st = 0 * dummy.astype("f")
@@ -237,7 +246,7 @@ def build_model(number_of_regions, inds, maps, config):
     model.G = model.G * dummy
     model.G[inds["thalspec"]] = 0.0
     # Retain connections
-    # from spinal nucleus of the trigeminal to S1 barrel field:
+    # from spinal nucleus of the trigeminal to S1 barrel field specific thalamus:
     model.G[inds["s1brlthal"]] = model.G[inds["crtx"][0]]
     # from interposed nucleus to M1:
     model.G[inds["m1thal"]] = model.G[inds["crtx"][0]]
@@ -274,13 +283,15 @@ def fic(param, p_orig, weights, trg_inds=None, src_inds=None, FIC=1.0, dummy=Non
 
     try:
         assert np.all(np.argsort(indegree) == np.argsort(-p[trg_inds]))  # the orderings should reverse
-    except:
-        plt.figure()
+    except Exception as e:
+        fig = plt.figure()
         plt.plot(indegree, p[trg_inds], "-o")
         plt.xlabel("%g*indegree" % FIC)
         plt.ylabel("%s scaled" % param)
         plt.title("Testing indegree and parameter anti-correlation")
         plt.tight_layout()
+        warnings.warn(str(e))
+        # raise e
 
     # Plot and confirm:
     if plotter:
@@ -292,39 +303,44 @@ def fic(param, p_orig, weights, trg_inds=None, src_inds=None, FIC=1.0, dummy=Non
         axes[0].hist(p[trg_inds], 30)
         axes[0].set_xlabel("Parameter values")
         axes[0].set_ylabel("Histogram of region counts")
-        axes[0].set_title("FICed parameter %s%s = %g (1 + Indegree scaler))" % (param, subtitle, pscalar))
+        axes[0].set_title("FICed parameter %s%s = %g + Indegree scaler)" % (param, subtitle, pscalar))
         fig.tight_layout()
+        if plotter.config.SAVE_FLAG:
+            plt.savefig(os.path.join(plotter.config.FOLDER_FIGURES, "FIC.png"))
+        if plotter.config.SHOW_FLAG:
+            plt.show()
+        else:
+            plt.close(fig)
     return p
 
 
-def prepare_fic(simulator, inds, FIC, G, plotter=None):
-    # Optimize w_ie and w_rs according to total indegree and G
-    if FIC and G > 0.0:
-        # Indices of cortical and subcortical regions excluding specific thalami
-        inds["non_thalamic"] = np.unique(inds['crtx'].tolist() + inds["subcrtx_not_thalspec"].tolist())
+def apply_fic(simulator, inds, FIC, G, plotter=None):
+    
+    # Indices of cortical and subcortical regions excluding specific thalami
+    inds["non_thalamic"] = np.unique(inds['crtx'].tolist() + inds["subcrtx_not_thalspec"].tolist())
 
-        # FIC for cortical w_ie against indegree for all incoming connections excluding the ones from specific thalami
+    # FIC for cortical w_ie against indegree for all incoming connections excluding the ones from specific thalami
+    simulator.model.w_ie = fic("w_ie", simulator.model.w_ie, simulator.connectivity.weights,
+                            inds["crtx"], inds["non_thalamic"],
+                            FIC=FIC, dummy=None, subtitle=" for cortex", plotter=plotter)
+
+    w_to_subcrtx = simulator.connectivity.weights[inds["subcrtx_not_thalspec"]].sum()
+    if w_to_subcrtx:
+        # FIC for subcortical w_ie against indegree for all incoming connections including the ones from specific thalami
         simulator.model.w_ie = fic("w_ie", simulator.model.w_ie, simulator.connectivity.weights,
-                                   inds["crtx"], inds["non_thalamic"],
-                                   FIC=FIC, dummy=None, subtitle=" for cortex", plotter=plotter)
+                                inds["subcrtx_not_thalspec"],
+                                src_inds=inds["non_thalamic"],  # after removal of subcrtx <-> specific thalamic
+                                FIC=FIC, dummy=None, subtitle=" for subcortex", plotter=plotter)
 
-        w_to_subcrtx = simulator.connectivity.weights[inds["subcrtx_not_thalspec"]].sum()
-        if w_to_subcrtx:
-            # FIC for subcortical w_ie against indegree for all incoming connections including the ones from specific thalami
-            simulator.model.w_ie = fic("w_ie", simulator.model.w_ie, simulator.connectivity.weights,
-                                       inds["subcrtx_not_thalspec"],
-                                       src_inds=inds["non_thalamic"],  # after removal of subcrtx <-> specific thalamic
-                                       FIC=FIC, dummy=None, subtitle=" for subcortex", plotter=plotter)
+    # # !!!Not needed after removal of subcrtx <-> specific thalamic connections!!!
+    # w_subcrtx_to_thal = simulator.connectivity.weights[inds["thalspec"]][:, inds["subcrtx_not_thalspec"]].sum()
+    # if w_subcrtx_to_thal:
+    #     # FIC for specific thalami w_rs against indegree for incoming connections from subcortical regions
+    #     simulator.model.w_rs = fic("w_rs", simulator.model.w_rs, simulator.connectivity.weights,
+    #                                inds["thalspec"], inds["subcrtx_not_thalspec"],
+    #                                FIC=FICeff, dummy=None, subtitle=" for specific thalami", plotter=plotter)
 
-        # # !!!Not needed after removal of subcrtx <-> specific thalamic connections!!!
-        # w_subcrtx_to_thal = simulator.connectivity.weights[inds["thalspec"]][:, inds["subcrtx_not_thalspec"]].sum()
-        # if w_subcrtx_to_thal:
-        #     # FIC for specific thalami w_rs against indegree for incoming connections from subcortical regions
-        #     simulator.model.w_rs = fic("w_rs", simulator.model.w_rs, simulator.connectivity.weights,
-        #                                inds["thalspec"], inds["subcrtx_not_thalspec"],
-        #                                FIC=FICeff, dummy=None, subtitle=" for specific thalami", plotter=plotter)
-
-        return simulator
+    return simulator
 
 
 def build_simulator(connectivity, model, inds, maps, config, plotter=None):
@@ -378,17 +394,17 @@ def build_simulator(connectivity, model, inds, maps, config, plotter=None):
     # wp = simulator.connectivity.weights > 0
     # h2, bins = np.histogram(simulator.connectivity.weights[wp].flatten(), range=(0.0, 1.25), bins=100)
 
-    # if plot_flag:
-    # x = bins[:-1] + np.diff(bins)/2
-    # plt.figure(figsize=(10, 5))
-    # plt.plot(x, h1, 'b', label='All connections before downscaling')
-    # plt.plot(x, h2, 'b--', label='All connections after downscaling')
-    # plt.plot(x, h_sub1, 'r', label='Subcortical connections before downscaling')
-    # plt.plot(x, h_sub2, 'r--', label='Subcortical connections after downscaling')
-    # plt.title("Histogram of logtransformed connectome weights\nwith downscaling connections")
-    # plt.legend()
-    # plt.ylim([0.0, h1.max()])
-    # plt.tight_layout()
+    # if plotter is not None:
+        # x = bins[:-1] + np.diff(bins)/2
+        # plt.figure(figsize=(10, 5))
+        # plt.plot(x, h1, 'b', label='All connections before downscaling')
+        # plt.plot(x, h2, 'b--', label='All connections after downscaling')
+        # plt.plot(x, h_sub1, 'r', label='Subcortical connections before downscaling')
+        # plt.plot(x, h_sub2, 'r--', label='Subcortical connections after downscaling')
+        # plt.title("Histogram of logtransformed connectome weights\nwith downscaling connections")
+        # plt.legend()
+        # plt.ylim([0.0, h1.max()])
+        # plt.tight_layout()
 
     simulator.coupling = SigmoidalPreThalamoCortical(
         is_thalamic=maps['is_thalamic'],
@@ -418,11 +434,11 @@ def build_simulator(connectivity, model, inds, maps, config, plotter=None):
     simulator.initial_conditions[:, [[1]], inds['thalspec']] = \
         simulator.model.I_r.mean().item() + 0.1 * np.random.normal(size=(1000, 1, n_thalspec, 1))
 
-    if config.FIC:
+    if config.FIC and simulator.model.G[0].item():
         if config.VERBOSE:
             print("Applying FIC = %g!" % config.FIC)
         # We will modify the w_ie and w_rs parameters a bit based on indegree and G:
-        simulator = prepare_fic(simulator, inds, config.FIC, simulator.model.G[0], plotter)
+        simulator = apply_fic(simulator, inds, config.FIC, simulator.model.G[0], plotter)
         # We will not run FIC though when fitting...
         # simulator.initial_conditions[:, -1, maps['is_thalamic'], :] = simulator.model.w_rs[
         #     None, maps['is_thalamic'], None]
@@ -468,6 +484,8 @@ def configure_simulation_length_with_transient(config):
     # Compute transient as a percentage of the total simulation length, and add it to the simulation length:
     simulation_length = float(config.SIMULATION_LENGTH)
     transient = config.TRANSIENT_RATIO * simulation_length
+    if config.RAW_PERIOD > config.DEFAULT_DT:
+        transient = (transient // config.RAW_PERIOD) * config.RAW_PERIOD + config.RAW_PERIOD/2
     simulation_length += transient
     return simulation_length, transient
 
@@ -482,48 +500,92 @@ def simulate(simulator, config):
     return results, transient
 
 
-def compute_target_PSDs(config, write_files=True, plotter=None):
+def compute_target_PSDs(config):
     # Load Popa 2013 files:
     psd_m1 = np.load(os.path.join(config.TARGET_PSD_POPA_PATH, "PSD_M1.npy"))
     psd_s1 = np.load(os.path.join(config.TARGET_PSD_POPA_PATH, "PSD_S1.npy"))
 
     # Interpolate to the desired frequency range:
-    f = config.TARGET_FREQS
-    psd_m1_target = np.interp(f, psd_m1[:, 0], psd_m1[:, 1])
-    psd_s1_target = np.interp(f, psd_s1[:, 0], psd_s1[:, 1])
+    psd_m1_target = np.interp(config.TARGET_FREQS, psd_m1[:, 0], psd_m1[:, 1])
+    psd_s1_target = np.interp(config.TARGET_FREQS, psd_s1[:, 0], psd_s1[:, 1])
 
     # Normalize to generate a PSD:
     psd_m1_target = psd_m1_target / psd_m1_target.sum()
     psd_s1_target = psd_s1_target / psd_s1_target.sum()
 
-    PSD_target = {"f": f, "PSD_M1_target": psd_m1_target, "PSD_S1_target": psd_s1_target}
+    return psd_m1_target, psd_s1_target
+
+
+def compute_target_PSDs_1D(config, write_files=True, plotter=None):
+    # Load, interpolate and normalize Popa 2013 m1 and s1 power spectra:
+    psd_m1_target, psd_s1_target = compute_target_PSDs(config)
+
+    psd_target = (psd_m1_target + psd_s1_target)/2
+
+    PSD_target = {"f": config.TARGET_FREQS, "PSD_target": psd_target}
     if write_files:
         np.save(config.PSD_TARGET_PATH, PSD_target)
 
     if plotter:
         fig, axes = plt.subplots(2, 1, figsize=(10, 10))
-        axes[0].plot(f, psd_m1_target, "b", label='M1 PS')
-        axes[0].plot(f, psd_s1_target, "g", label='S1 PS')
+        axes[0].plot(config.TARGET_FREQS, psd_target, "k")
+        axes[0].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
         axes[0].set_ylabel('PS')
-        axes[0].legend()
-        axes[1].semilogy(f, psd_m1_target, "b", label='M1 PS')
-        axes[1].semilogy(f, psd_s1_target, "g", label='S1 PS')
+        axes[0].set_title('Target average of M1 and S1 PS')
+        axes[1].semilogy(config.TARGET_FREQS, psd_target, "k")
+        axes[1].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
         axes[1].set_xlabel('Frequency (Hz)')
         axes[1].set_ylabel('log(PS)')
-
+        if plotter.config.SAVE_FLAG:
+            plt.savefig(os.path.join(plotter.config.FOLDER_FIGURES, "TargetPSD1D.png"))
+        if plotter.config.SHOW_FLAG:
+            plt.show()
+        else:
+            plt.close(fig) 
     return PSD_target
 
 
-def compute_data_PSDs(raw_results, PSD_target, inds, transient=None, write_files=True, plotter=None):
+def compute_target_PSDs_m1s1brl(config, write_files=True, plotter=None):
+    # Load, interpolate and normalize Popa 2013 m1 and s1 power spectra:
+    psd_m1_target, psd_s1_target = compute_target_PSDs(config)
+
+    PSD_target = {"f": config.TARGET_FREQS, "PSD_M1_target": psd_m1_target, "PSD_S1_target": psd_s1_target}
+    if write_files:
+        np.save(config.PSD_TARGET_PATH, PSD_target)
+
+    if plotter:
+        fig, axes = plt.subplots(2, 1, figsize=(10, 10))
+        axes[0].plot(config.TARGET_FREQS, psd_m1_target, "b", label='M1')
+        axes[0].plot(config.TARGET_FREQS, psd_s1_target, "g", label='S1')
+        axes[0].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
+        axes[0].set_ylabel('PS')
+        axes[0].set_title('Target M1 and S1 PS')
+        axes[0].legend()
+        axes[1].semilogy(config.TARGET_FREQS, psd_m1_target, "b", label='M1')
+        axes[1].semilogy(config.TARGET_FREQS, psd_s1_target, "g", label='S1')
+        axes[1].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
+        axes[1].set_xlabel('Frequency (Hz)')
+        axes[1].set_ylabel('log(PS)')
+        if plotter.config.SAVE_FLAG:
+            plt.savefig(os.path.join(plotter.config.FOLDER_FIGURES, "TargetPSDm1s1brl.png"))
+        if plotter.config.SHOW_FLAG:
+            plt.show()
+        else:
+            plt.close(fig)
+    return PSD_target
+
+
+def compute_data_PSDs(raw_results, PSD_target, inds, transient=None, average_region_ps=False):
     # Time and frequency
     dt = np.mean(np.diff(raw_results[0]))
     fs = 1000.0 / dt  # sampling frequency in sec
     if transient is None:
-        transient = raw_results[0][0]
-    transient = int(np.ceil(transient / dt))  # in data points
+        transient = 0
+    else:
+        transient = int(np.ceil(transient / dt))  # in data points
 
     # data
-    data = raw_results[1][transient:, 0, inds['m1s1brl'], 0].squeeze().T
+    data = raw_results[1][transient:, 0, inds, 0].squeeze().T
 
     # Window:
     # NPERSEG = np.array([256, 512, 1024, 2048, 4096])
@@ -535,38 +597,87 @@ def compute_data_PSDs(raw_results, PSD_target, inds, transient=None, write_files
     # Compute Power Spectrum
     f, Pxx_den = welch(data, fs, nperseg=nperseg)
 
+    if average_region_ps:
+        # Average power spectra across regions for the case of 1D computations
+        Pxx_den = Pxx_den.mean(axis=0, keepdims=True)
+
     # print(Pxx_den.shape)
 
     # Compute spectrum interpolation...
     interp = interp1d(f, Pxx_den, kind='linear', axis=1,
                       copy=True, bounds_error=None, fill_value=0.0, assume_sorted=True)
-
     # ...to the target frequencies:
     Pxx_den = interp(PSD_target["f"])
 
     # Normalize to get a density summing to 1.0:
-    for ii in range(4):
+    for ii in range(Pxx_den.shape[0]):
         Pxx_den[ii] = Pxx_den[ii] / np.sum(Pxx_den[ii])
+
+    return Pxx_den, ftarg
+
+
+def compute_data_PSDs_1D(raw_results, PSD_target, inds, transient=None, write_files=True, plotter=None):
+
+    # Select regions' data, compute PSDs, average them across region,
+    # interpolate them to the target frequencies, and normalize them to sum up to 1.0:
+    Pxx_den, ftarg = compute_data_PSDs(raw_results, PSD_target, inds['crtx'], transient=transient, average_region_ps=True)
+    Pxx_den = Pxx_den.flatten()
 
     if plotter:
         fig, axes = plt.subplots(2, 1, figsize=(10, 10))
-        axes[0].plot(ftarg, PSD_target['PSD_M1_target'], "b", label='M1 PS target')
-        axes[0].plot(ftarg, PSD_target['PSD_S1_target'], "g", label='S1 PS target')
-        axes[0].plot(ftarg, Pxx_den[0], "b--", label='M1 PS right')
-        axes[0].plot(ftarg, Pxx_den[1], "b-.", label='M1 PS left')
-        axes[0].plot(ftarg, Pxx_den[2], "g--", label='S1 PS right')
-        axes[0].plot(ftarg, Pxx_den[3], "g-.", label='S1 PS left')
+        axes[0].plot(ftarg, PSD_target['PSD_target'], "k", label='Target')
+        axes[0].plot(ftarg, Pxx_den, "r", label='Cortical average')
+        axes[0].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
         axes[0].set_ylabel('PS')
         axes[0].legend()
-        axes[1].semilogy(ftarg, PSD_target['PSD_M1_target'], "b", label='M1 PS')
-        axes[1].semilogy(ftarg, PSD_target['PSD_S1_target'], "g", label='S1 PS')
-        axes[1].semilogy(ftarg, Pxx_den[0], "b--", label='M1 PS right')
-        axes[1].semilogy(ftarg, Pxx_den[1], "b-.", label='M1 PS left')
-        axes[1].semilogy(ftarg, Pxx_den[2], "g--", label='S1 PS right')
-        axes[1].semilogy(ftarg, Pxx_den[3], "g-.", label='S1 PS left')
+        axes[1].semilogy(ftarg, PSD_target['PSD_target'], "k", label='Target')
+        axes[1].semilogy(ftarg, Pxx_den, "r", label='Cortical average')
+        axes[1].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
         axes[1].set_xlabel('Frequency (Hz)')
         axes[1].set_ylabel('log(PS)')
+        if plotter.config.SAVE_FLAG:
+            plt.savefig(os.path.join(plotter.config.FOLDER_FIGURES, "DataVSTargetPSD1D.png"))
+        if plotter.config.SHOW_FLAG:
+            plt.show()
+        else:
+            plt.close(fig)
+    # if write_files:
+    #     np.save
+    return Pxx_den
 
+
+def compute_data_PSDs_m1s1brl(raw_results, PSD_target, inds, transient=None, write_files=True, plotter=None):
+
+    # Select regions' data, compute PSDs, interpolate them to the target frequencies, 
+    # and normalize them to sum up to 1.0:
+    Pxx_den, ftarg = compute_data_PSDs(raw_results, PSD_target, inds['m1s1brl'], transient=transient, average_region_ps=False)
+
+    if plotter:
+        fig, axes = plt.subplots(2, 1, figsize=(10, 10))
+        axes[0].plot(ftarg, PSD_target['PSD_M1_target'], "b", label='M1 target')
+        axes[0].plot(ftarg, PSD_target['PSD_S1_target'], "g", label='S1 target')
+        axes[0].plot(ftarg, Pxx_den[0], "b--", label='M1 right')
+        axes[0].plot(ftarg, Pxx_den[1], "b-.", label='M1 left')
+        axes[0].plot(ftarg, Pxx_den[2], "g--", label='S1 right')
+        axes[0].plot(ftarg, Pxx_den[3], "g-.", label='S1 left')
+        axes[0].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
+        axes[0].set_ylabel('PS')
+        axes[0].legend()
+        axes[1].semilogy(ftarg, PSD_target['PSD_M1_target'], "b", label='M1 target')
+        axes[1].semilogy(ftarg, PSD_target['PSD_S1_target'], "g", label='S1 target')
+        axes[1].semilogy(ftarg, Pxx_den[0], "b--", label='M1 right')
+        axes[1].semilogy(ftarg, Pxx_den[1], "b-.", label='M1 left')
+        axes[1].semilogy(ftarg, Pxx_den[2], "g--", label='S1 right')
+        axes[1].semilogy(ftarg, Pxx_den[3], "g-.", label='S1 left')
+        axes[1].set_xticks([6.0, 8.0, 10.0, 20.0, 30.0, 40.0])
+        axes[1].set_xlabel('Frequency (Hz)')
+        axes[1].set_ylabel('log(PS)')
+        if plotter.config.SAVE_FLAG:
+            plt.savefig(os.path.join(plotter.config.FOLDER_FIGURES, "DataVSTargetPSDm1s1brl.png"))
+        if plotter.config.SHOW_FLAG:
+            plt.show()
+        else:
+            plt.close(fig)
     # if write_files:
     #     np.save
     return Pxx_den.flatten()
@@ -587,15 +698,15 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
     config = assert_config(config, return_plotter=False)
 
-    # writer = False
-    # if write_files:
-    #     # If you want to see what the function above does, take the steps, one by one
-    #     try:
-    #         # We need framework_tvb for writing and reading from HDF5 files
-    #         from tvb_multiscale.core.tvb.io.h5_writer import H5Writer
-    #         writer = H5Writer()
-    #     except:
-    #         warning("H5Writer cannot be imported! Probably you haven't installed tvb_framework.")
+    writer = False
+    if write_files:
+        # If you want to see what the function above does, take the steps, one by one
+        try:
+            # We need framework_tvb for writing and reading from HDF5 files
+            from tvb_multiscale.core.tvb.io.h5_writer import H5Writer
+            writer = H5Writer()
+        except:
+            warnings.warn("H5Writer cannot be imported! Probably you haven't installed tvb_framework.")
 
     from tvb.contrib.scripts.datatypes.time_series import TimeSeriesRegion
     from tvb.contrib.scripts.datatypes.time_series_xarray import TimeSeriesRegion as TimeSeriesXarray
@@ -626,11 +737,15 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             with open(config.SOURCE_TS_PATH, 'wb') as handle:
                 pickle.dump(source_ts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-        # # Write to file
-        # if writer:
-        #     writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(source_ts._data,
-        #                                                                     connectivity=source_ts.connectivity),
-        #                            os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
+        # Write to file
+        if writer:
+            try:
+                writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(source_ts._data,
+                                                                                connectivity=source_ts.connectivity),
+                                    os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
+            except Exception as e:
+                    warnings.warn("Failed to to write source time series to file with error!:\n%s" % str(e))
+
         if config.VERBOSE > 1:
             print("Raw ts:\n%s" % str(source_ts))
 
@@ -653,26 +768,35 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
             # Write to file
             if writer:
-                writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(bold_ts._data,
-                                                                                connectivity=bold_ts.connectivity),
-                                       os.path.join(config.out.FOLDER_RES, bold_ts.title) + ".h5")
-            # print("BOLD ts:\n%s" % str(bold_ts))
+                try:
+                    writer.write_tvb_to_h5(TimeSeriesRegion().from_xarray_DataArray(bold_ts._data,
+                                                                                    connectivity=bold_ts.connectivity),
+                                        os.path.join(config.out.FOLDER_RES, bold_ts.title) + ".h5")
+                except Exception as e:
+                    warnings.warn("Failed to to write BOLD time series to file with error!:\n%s" % str(e))
+            
+            if config.VERBOSE > 1:
+                print("BOLD ts:\n%s" % str(bold_ts))
 
     return tuple(outputs)
 
 
 def plot_tvb(transient, inds,
-             results=None, source_ts=None, bold_ts=None, PSD_target=None, PSD=None,
+             results=None, source_ts=None, bold_ts=None,
              simulator=None, plotter=None, config=None, write_files=True):
-    config, plotter = assert_config(config, return_plotter=True)
+    if plotter is None:
+        config, plotter = assert_config(config, return_plotter=True)
+    else:
+        config = assert_config(config, return_plotter=False)
     MAX_VARS_IN_COLS = 2
     MAX_REGIONS_IN_ROWS = 10
     MIN_REGIONS_FOR_RASTER_PLOT = 9
-    transient += 0.5
     FIGSIZE = config.figures.DEFAULT_SIZE
 
+    outputs = ()
     if source_ts is None:
         results = tvb_res_to_time_series(results, simulator, config=config, write_files=write_files)
+        outputs = results
         source_ts = results[0]
         if len(results) > 1:
             bold_ts = results[1]
@@ -721,23 +845,22 @@ def plot_tvb(transient, inds,
                                 per_variable=bold_ts.shape[1] > MAX_VARS_IN_COLS,
                                 figsize=FIGSIZE);
 
-    # PSD results versus target plot:
-    if PSD_target is None:
-        PSD_target = compute_target_PSDs(config, write_files=False, plotter=None)
-        PSD = compute_data_PSDs([source_ts.time, source_ts.data], PSD_target, inds, transient,
-                                write_files=False, plotter=plotter)
-
     from examples.tvb_nest.notebooks.cerebellum.utils import compute_plot_selected_spectra_coherence #, compute_plot_ica
 
     # Further spectra and coherence plots:
 
-    NPERSEG = np.array([256, 512, 1024, 2048, 4096])
-    NPERSEG = NPERSEG[np.argmin(np.abs(NPERSEG - (source_ts.shape[0] - transient / config.DEFAULT_DT)))]
+    # NPERSEG = np.array([256, 512, 1024, 2048, 4096])
+    # dt = source_ts.time[1] - source_ts.time[0]
+    # NPERSEG = NPERSEG[np.argmin(np.abs(NPERSEG - (source_ts.shape[0] - transient / dt)/10))]
+
+    NPERSEG = 2048
 
     # Power Spectra and Coherence for M1 - S1 barrel field
-    CxyR, fR, fL, CxyL = compute_plot_selected_spectra_coherence(source_ts, inds["m1s1brl"],
-                                                                 transient=transient, nperseg=NPERSEG, fmin=0.0,
-                                                                 fmax=100.0)
+    CxyR, fR, fL, CxyL = \
+        compute_plot_selected_spectra_coherence(source_ts, inds["m1s1brl"],
+                                                transient=transient, nperseg=NPERSEG, fmin=0.0, fmax=100.0, 
+                                                figures_path=config.figures.FOLDER_FIGURES, figname="M1_S1brl", figformat="png",
+                                                show_flag=plotter.config.SHOW_FLAG, save_flag=plotter.config.SAVE_FLAG)
     if write_files:
         import pickle
         with open('coherence_MF_cerebON_2sec.pickle', 'wb') as handle:
@@ -746,7 +869,9 @@ def plot_tvb(transient, inds,
     # Power Spectra and Coherence along the sensory pathway:
     # for Medulla SPV, Sensory PONS
     compute_plot_selected_spectra_coherence(source_ts, inds["sens"],
-                                            transient=transient, nperseg=NPERSEG, fmin=0.0, fmax=100.0)
+                                            transient=transient, nperseg=NPERSEG, fmin=0.0, fmax=100.0, 
+                                            figures_path=config.figures.FOLDER_FIGURES, figname="SPV_PonsSens", figformat="png",
+                                            show_flag=plotter.config.SHOW_FLAG, save_flag=plotter.config.SAVE_FLAG)
 
     # Better summary figure:
     import matplotlib.pyplot as plt
@@ -782,12 +907,24 @@ def plot_tvb(transient, inds,
     fig.tight_layout()
     if config.figures.SAVE_FLAG:
         plt.savefig(os.path.join(config.figures.FOLDER_FIGURES, "SummaryTimeSeries." + config.figures.FIG_FORMAT))
+    if config.figures.SHOW_FLAG:
+        plt.show()
+    else:
+        plt.close(fig)
+
+    return outputs
 
 
-def run_workflow(PSD_target=None, model_params={}, config=None, **config_args):
+def run_workflow(PSD_target=None, model_params={}, config=None, write_files=True, **config_args):
+    tic = time.time()
     # Get configuration
-    config, plotter = assert_config(config, **config_args)
+    plot_flag = config_args.get('plot_flag', DEFAULT_ARGS.get('plot_flag'))
+    config, plotter = assert_config(config, return_plotter=True, **config_args)
     config.model_params.update(model_params)
+    if config.VERBOSE:
+        print("\n\n------------------------------------------------\n\n"+
+              "Running TVB workflow for plot_flag=%s, write_files=%s,\nand model_params=\n%s...\n" 
+              % (str(plot_flag), str(write_files), str(config.model_params)))
     # Load and prepare connectome and connectivity with all possible normalizations:
     connectome, major_structs_labels, voxel_count, inds, maps = prepare_connectome(config, plotter=plotter)
     connectivity = build_connectivity(connectome, inds, config)
@@ -821,18 +958,30 @@ def run_workflow(PSD_target=None, model_params={}, config=None, **config_args):
     # Run simulation and get results
     results, transient = simulate(simulator, config)
     if PSD_target is None:
-        # This is the PSD target we are trying to fit:
-        PSD_target = compute_target_PSDs(config, write_files=True, plotter=plotter)
-    # This is the PSD computed from our simulation results.
-    PSD = compute_data_PSDs(results[0], PSD_target, inds, transient, plotter=plotter)
-    if config_args.get('plot_flag', True):
-        plot_tvb(transient, inds, results=results,
-                 source_ts=None, bold_ts=None, PSD_target=PSD_target, PSD=PSD,
-                 simulator=simulator, plotter=plotter, config=config, write_files=True)
-        return PSD, results, simulator, config
+        # This is the PSD target we are trying to fit...
+        if config.model_params['G']:
+            # ...for a connected brain, i.e., PS of bilateral M1 and S1:
+            PSD_target = compute_target_PSDs_m1s1brl(config, write_files=True, plotter=plotter)
+        else:
+            # ...for a disconnected brain, average PS of all regions:
+            PSD_target = compute_target_PSDs_1D(config, write_files=True, plotter=plotter)
+    # This is the PSD computed from our simulation results...
+    if config.model_params['G']:
+        # ...for a connected brain, i.e., PS of bilateral M1 and S1:
+        PSD = compute_data_PSDs_m1s1brl(results[0], PSD_target, inds, transient, plotter=plotter)
     else:
-        return PSD, results
-
+        # ...for a disconnected brain, average PS of all regions:
+        PSD = compute_data_PSDs_1D(results[0], PSD_target, inds, transient, plotter=plotter)
+    outputs = (PSD, results, transient, simulator, config)
+    if plotter is not None:
+        outputs = outputs + plot_tvb(transient, inds, results=results, source_ts=None, bold_ts=None,
+                                     simulator=simulator, plotter=plotter, config=config, write_files=write_files)
+    else:
+        if write_files:
+            outputs = outputs + tvb_res_to_time_series(results, simulator, config=config, write_files=write_files)
+    if config.VERBOSE:
+        print("\nFinished TVB workflow in %g sec!\n" % (time.time() - tic))
+    return outputs
 
 if __name__ == "__main__":
     parser = args_parser("tvb_script")

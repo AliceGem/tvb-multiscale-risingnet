@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 
 import warnings
+import pickle
 import torch
 from sbi.inference.base import infer, prepare_for_sbi, simulate_for_sbi
 from sbi.inference import SNPE
 from sbi import utils as utils
 from sbi import analysis as analysis
+
+from tvb.contrib.scripts.utils.data_structures_utils import ensure_list
 
 from examples.tvb_nest.notebooks.cerebellum.scripts.base import *
 from examples.tvb_nest.notebooks.cerebellum.scripts.tvb_script import run_workflow
@@ -111,7 +114,7 @@ def simulate_TVB_for_sbi_batch(iB, iG=None, config=None, write_to_file=True):
         if config.VERBOSE:
             print("\n\nSimulation %d/%d for iG=%d, iB=%d" % (iS+1, n_simulations, iG, iB))
             print("Simulating for parameters:\n%s" % str(priors_params))
-        sim_res.append(run_workflow(model_params=priors_params, config=config, plot_flag=False)[0])
+        sim_res.append(run_workflow(model_params=priors_params, config=config, plot_flag=False, write_files=False)[0])
         if write_to_file:
             write_batch_sim_res_to_file_per_iG(sim_res, iB, iG, config)
     return sim_res
@@ -140,6 +143,18 @@ def load_priors_and_simulations_for_sbi(iG=None, priors=None, priors_samples=Non
     return priors, priors_samples, sim_res
 
 
+def posterior_filepath(config, iG=None, iR=None, filepath=None, extension=None):
+    if iG is None and iR is None:
+        return str(config.POSTERIOR_PATH)
+    if filepath is None or extension is None:
+        filepath, extension = os.path.splitext(os.path.join(config.out.FOLDER_RES, config.POSTERIOR_PATH))
+    if iG is not None:
+        filepath += "_iG%02d" % iG
+    if iR is not None:
+        filepath += "_iR%02d" % iR
+    return "%s%s" % (filepath, extension)
+
+
 def posterior_samples_filepath(config, iG=None, filepath=None, extension=None):
     if iG is None:
         return config.POSTERIOR_SAMPLES_PATH
@@ -149,7 +164,14 @@ def posterior_samples_filepath(config, iG=None, filepath=None, extension=None):
     return "%s_iG%02d%s" % (filepath, iG, extension)
 
 
-def write_posterior_samples(samples, iG=None, config=None):
+def write_posterior(posterior, iG=None, iR=None, config=None):
+    config = assert_config(config, return_plotter=False)
+    filepath = posterior_filepath(config, iG, iR)
+    with open(filepath, "wb") as handle:
+        pickle.dump(posterior, handle)
+
+
+def write_posterior_samples(samples, map=None, iG=None, config=None):
     config = assert_config(config, return_plotter=False)
     filepath = posterior_samples_filepath(config, iG)
     if os.path.isfile(filepath):
@@ -161,16 +183,39 @@ def write_posterior_samples(samples, iG=None, config=None):
         samples_fit['samples'] = []
         samples_fit['mean'] = []
         samples_fit['std'] = []
+        samples_fit['map'] = []
     samples_fit['samples'].append(samples.numpy())
     samples_fit['mean'].append(samples.mean(axis=0).numpy())
     samples_fit['std'].append(samples.std(axis=0).numpy())
+    if map is not None:
+        samples_fit['map'].append(map.numpy())
     np.save(filepath, samples_fit, allow_pickle=True)
+    return samples_fit
 
 
-def load_posterior_samples(iG, config=None):
+def load_posterior(iG=None, iR=None, config=None):
+    config = assert_config(config, return_plotter=False)
+    filepath = posterior_filepath(config, iG, iR)
+    with open(filepath, "rb") as handle:
+        posterior = pickle.load(handle)
+    return posterior
+
+
+def load_posterior_samples(iG=None, config=None):
     config = assert_config(config, return_plotter=False)
     filepath = posterior_samples_filepath(config, iG)
     return np.load(filepath, allow_pickle=True).item()
+
+
+def load_posterior_samples_all_Gs(config=None):
+    config = assert_config(config, return_plotter=False)
+    samples = OrderedDict()
+    for iG, G in enumerate(config.Gs):
+        try:
+            samples[G] = load_posterior_samples(iG, config)
+        except Exception as e:
+            warnings.warn("Failed to load posterior samples for iG=%d, G=%g!\n%s" % (iG, G, str(e)))
+    return samples
 
 
 def sbi_infer(priors, priors_samples, sim_res, n_samples_per_run, target, verbose):
@@ -195,7 +240,44 @@ def sbi_infer(priors, priors_samples, sim_res, n_samples_per_run, target, verbos
             keep_building += 1
     if posterior is None:
         raise Exception(exception)
-    return posterior.sample((n_samples_per_run,), x=target)
+    posterior.set_default_x(target)
+    return posterior, posterior.sample((n_samples_per_run,)), posterior.map()
+
+    
+def plot_infer_for_iG(iG, iR=None, samples=None, config=None):
+    config = assert_config(config, return_plotter=False)
+    if samples is None:
+        samples = load_posterior_samples(iG, config)
+    if iR is None:
+        iR = -1
+    # Get the default values for the parameter except for G
+    params = OrderedDict()
+    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, config.model_params.values()):
+        params[pname] = pval
+    if config.OPT_RES_MODE == 'mean':
+        params.update(dict(zip(config.PRIORS_PARAMS_NAMES, samples['mean'][-1])))
+    else:
+        params.update(dict(zip(config.PRIORS_PARAMS_NAMES, samples['map'][-1])))
+    limits = []
+    for pmin, pmax in zip(config.prior_min, config.prior_max):
+        limits.append([pmin, pmax])
+    if config.VERBOSE:
+        print("\nPlotting posterior for G[%d]=%g..." % (iG, samples['G']))
+    fig, axes = analysis.pairplot(samples['samples'][-1],
+                                  limits=limits,
+                                  ticks=limits,
+                                  figsize=(10, 10),
+                                  labels=config.PRIORS_PARAMS_NAMES,
+                                  points=np.array(list(params.values())),
+                                  points_offdiag={'markersize': 6},
+                                  points_colors=['r'] * config.n_priors)
+    if config.figures.SAVE_FLAG:
+        plt.savefig(os.path.join(config.figures.FOLDER_FIGURES, 'sbi_pairplot_G%g.png' % samples ['G']))
+    if config.figures.SHOW_FLAG:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig, axes
 
 
 def sbi_infer_for_iG(iG, config=None):
@@ -207,10 +289,14 @@ def sbi_infer_for_iG(iG, config=None):
         print("\n\nFitting for G = %g!\n" % G)
     # Load the target
     PSD_target = np.load(config.PSD_TARGET_PATH, allow_pickle=True).item()
-    # Duplicate the target for the two M1 regions (right, left) and the two S1 barrel field regions (right, left)
-    #                                        right                       left
-    psd_targ_conc = np.concatenate([PSD_target["PSD_M1_target"], PSD_target["PSD_M1_target"],
-                                    PSD_target["PSD_S1_target"], PSD_target["PSD_S1_target"]])
+    if G> 0.0:
+        # If this we are fitting for a connected network...
+        # Duplicate the target for the two M1 regions (right, left) and the two S1 regions (right, left)
+        #                                        right                       left
+        psd_targ = np.concatenate([PSD_target["PSD_M1_target"], PSD_target["PSD_M1_target"],  # M1
+                                   PSD_target["PSD_S1_target"], PSD_target["PSD_S1_target"]]) # S1
+    else:
+        psd_targ = PSD_target['PSD_target']
     priors, priors_samples, sim_res = load_priors_and_simulations_for_sbi(iG, config=config)
     n_samples = sim_res.shape[0]
     if priors_samples.shape[0] > n_samples:
@@ -226,10 +312,11 @@ def sbi_infer_for_iG(iG, config=None):
         # Choose a subsample of the whole set of samples:
         sampl_inds = random.sample(all_inds, n_train_samples)
         # Train the network, build the posterior and sample it:
-        posterior_samples = sbi_infer(priors, priors_samples[sampl_inds], sim_res[sampl_inds],
-                                      config.N_SAMPLES_PER_RUN, psd_targ_conc, config.VERBOSE)
-        # Write samples to file:
-        write_posterior_samples(posterior_samples, iG, config)
+        posterior, posterior_samples, map = sbi_infer(priors, priors_samples[sampl_inds], sim_res[sampl_inds],
+                                                      config.N_SAMPLES_PER_RUN, psd_targ, config.VERBOSE)
+        # Write posterior and samples to files:
+        write_posterior(posterior, iG, iR, config)
+        samples_fit = write_posterior_samples(posterior_samples, map, iG, config)
         if config.VERBOSE:
             print("Done with run %d in %g sec!" % (iR, time.time() - ticR))
 
@@ -238,48 +325,93 @@ def sbi_infer_for_iG(iG, config=None):
         print("\n\nFitting with all samples!..\n")
     ticR = time.time()
     # Train the network, build the posterior and sample it:
-    posterior_samples = sbi_infer(priors, priors_samples[:n_samples], sim_res,
-                                  config.N_SAMPLES_PER_RUN, psd_targ_conc, config.VERBOSE)
-    # Write samples to file:
-    write_posterior_samples(posterior_samples, iG, config)
+    posterior, posterior_samples, map = sbi_infer(priors, priors_samples[:n_samples], sim_res,
+                                                  config.N_SAMPLES_PER_RUN, psd_targ, config.VERBOSE)
+    # Write posterior and samples to files:
+    write_posterior(posterior, iG, iR=None, config=config)
+    samples_fit = write_posterior_samples(posterior_samples, map, iG, config)
     if config.VERBOSE:
         print("Done with fitting with all samples in %g sec!" % (time.time() - ticR))
 
     # Plot posterior:
-    if config.VERBOSE:
-        print("\nPlotting posterior...")
-    limits = []
-    for pmin, pmax in zip(config.prior_min, config.prior_max):
-        limits.append([pmin, pmax])
-    # Get the default values for the parameter except for G
-    params = OrderedDict()
-    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, config.model_params.values()):
-        params[pname] = pval
-    params.update(dict(zip(config.PRIORS_PARAMS_NAMES, posterior_samples.mean(axis=0).numpy())))
-    fig, axes = analysis.pairplot(posterior_samples,
-                                  limits=limits,
-                                  ticks=limits,
-                                  figsize=(10, 10),
-                                  labels=config.PRIORS_PARAMS_NAMES,
-                                  points=np.array(list(params.values())),
-                                  points_offdiag={'markersize': 6},
-                                  points_colors=['r'] * config.n_priors)
-    plt.savefig(os.path.join(config.figures.FOLDER_FIGURES, 'sbi_pairplot_G%g.png' % G))
-
-    # # Run one simulation with the posterior means:
-    # if config.VERBOSE:
-    #   print("\nSimulating with posterior means...")
-    #   print("params =\n", params)
-    # model_params = {"G": G}
-    # PSD, results, simulator, output_config = run_workflow(PSD_target=PSD_target, model_params=model_params,
-    #                                                       config=config, plot_flag=True,
-    #                                                       output_folder="G_%g" % G, **params)
+    plot_infer_for_iG(iG, iR=None, samples=samples_fit, config=config);
 
     if config.VERBOSE:
         print("\n\nFinished after %g sec!" % (time.time() - tic))
         print("\n\nFind results in %s!" % config.out.FOLDER_RES)
 
     return posterior_samples  # , results, fig, simulator, output_config
+
+
+def plot_sbi_fit(config=None):
+    FIGWIDTH = 15
+    FIGHEIGHT_PER_PRIOR = 5
+    RUNS_COLOR = 'k'
+    LAST_RUN_COLOR = 'r'
+    SAMPLES_MARKER_SIZE = 0.1
+    MARKER_MEAN = 'o'
+    MARKER_MAP = 'x'
+    MARKER_SIZE = 5.0
+    SAMPLES_ALPHA = 0.1
+    RUNS_ALPHA = 0.5
+    PLOT_RUNS = True
+    PLOT_SAMPLES = True
+
+    def plot_run(ax, G, map, mean, std, samples=None, is_last=False):
+        color = RUNS_COLOR
+        alpha = 1.0
+        if is_last:
+            color = LAST_RUN_COLOR
+            alpha = RUNS_ALPHA
+        if samples is not None:
+            ax.plot([G] * len(samples), samples, marker=MARKER_MEAN,
+                    markersize=SAMPLES_MARKER_SIZE, markeredgecolor=color, markerfacecolor=color,
+                    linestyle='None', alpha=SAMPLES_ALPHA)
+        ax.plot(G, mean, marker=MARKER_MEAN,
+                markersize=MARKER_SIZE, markeredgecolor=color, markerfacecolor=color,
+                linestyle='None', alpha=alpha)
+        ax.plot(G, map, marker=MARKER_MAP,
+                markersize=MARKER_SIZE, markeredgecolor=color, markerfacecolor=color,
+                linestyle='None', alpha=alpha)
+        ax.plot([G] * 2, [mean - std, mean + std], color=color, linestyle='-', linewidth=1, alpha=alpha)
+        return ax
+
+    def plot_G(ax, samples, iP):
+        n_runs = len(samples['mean'])
+        if PLOT_RUNS:
+            iR_start = 0
+        else:
+            iR = n_runs - 1
+        for iR in range(iR_start, n_runs):
+            ax = plot_run(ax, samples['G'], samples['map'][iR][iP], samples['mean'][iR][iP], samples['std'][iR][iP],
+                          samples=samples['samples'][iR][:, iP] if PLOT_SAMPLES else None, is_last=iR == n_runs - 1)
+        return ax
+
+    def plot_parameter(ax, iP, pname, samples, is_last=False):
+        for G, sg in samples.items():
+            ax = plot_G(ax, sg, iP)
+        Gs = list(samples.keys())
+        if is_last:
+            ax.set_xticks(Gs)
+            ax.set_xticklabels(Gs)
+            ax.set_xlabel("G")
+        ax.set_ylabel(pname)
+        return ax
+
+    config = assert_config(config, return_plotter=False)
+    samples = load_posterior_samples_all_Gs(config)
+    fig, axes = plt.subplots(config.n_priors, 1, figsize=(FIGWIDTH, FIGHEIGHT_PER_PRIOR * config.n_priors))
+    axes = ensure_list(axes)
+    for iP, ax in enumerate(axes):
+        axes[iP] = plot_parameter(ax, iP, config.PRIORS_PARAMS_NAMES[iP], samples,
+                                  is_last=iP == config.n_priors - 1)
+    fig.tight_layout()
+    if config.figures.SHOW_FLAG:
+        fig.show()
+    if config.figures.SAVE_FLAG:
+        plt.savefig(config.SBI_FIT_PLOT_PATH)
+
+    return fig, axes
 
 
 def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_params={}):
@@ -298,8 +430,8 @@ def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_pa
     # Get the default values for the parameter except for G
     params = dict(config.model_params)
     params['G'] = G
-    # Set the posterior means of the parameters:
-    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, samples_fit['mean'][iR]):
+    # Set the posterior means or maps of the parameters:        
+    for pname, pval in zip(config.PRIORS_PARAMS_NAMES, samples_fit[config.OPT_RES_MODE][iR]):
         if pname == "FIC":
             config.FIC = pval
         else:
@@ -307,7 +439,7 @@ def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_pa
 
     # Run one simulation with the posterior means:
     if config.VERBOSE:
-        print("\nSimulating with posterior means...")
+        print("Simulating using the estimate of the %s of the parameters' posterior distribution!" % config.OPT_RES_MODE)
         print("params =\n", params)
     if workflow_fun is None:
         workflow_fun = run_workflow
