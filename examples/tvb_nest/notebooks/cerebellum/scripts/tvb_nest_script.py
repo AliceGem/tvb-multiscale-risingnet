@@ -48,7 +48,7 @@ def print_available_interfaces():
     print_enum(DefaultSpikeNetToTVBTransformersThalamoCorticalWCInverseSigmoidal)
 
 
-def build_tvb_nest_interfaces(simulator, nest_network, nest_nodes_inds, config):
+def build_tvb_nest_interfaces(simulator, nest_network, nest_nodes_inds, config, tvb_to_nest_gain=100):
 
     # Build a TVB-NEST interface with all the appropriate connections between the
     # TVB and NEST modelled regions
@@ -93,7 +93,8 @@ def build_tvb_nest_interfaces(simulator, nest_network, nest_nodes_inds, config):
 
     # from tvb_multiscale.core.interfaces.tvb.interfaces import TVBtoSpikeNetModels
 
-    max_rate = 100.0  #Hz
+    
+    max_rate = tvb_to_nest_gain     # max_rate = 100.0  #Hz
     # if tvb_spikeNet_model_builder.default_coupling_mode == "TVB":
     #     proxy_inds = nest_nodes_inds
     # else:
@@ -169,7 +170,7 @@ def build_tvb_nest_interfaces(simulator, nest_network, nest_nodes_inds, config):
         else:
             # !!! Parameters for linear NEST -> TVB transformer: !!!
             transformer_params = {"scale_factor": w_NEST_to_TVB,
-                                   "translation_factor": np.array([-0.5])}
+                                   "translation_factor": np.array([-0.5])}      # For now, we need an offset/baseline (negative)
             w_name = "scale_factor"
         tvb_spikeNet_model_builder.input_interfaces.append(
             {'voi': np.array(['E']),

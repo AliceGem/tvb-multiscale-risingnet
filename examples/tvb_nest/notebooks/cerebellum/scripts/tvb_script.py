@@ -733,7 +733,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             import pickle
             if config.VERBOSE:
                 print("Pickle-dumping source_ts to %s!" % config.SOURCE_TS_PATH)
-            #dump_picked_time_series(source_ts, config.SOURCE_TS_PATH)
+            dump_picked_time_series(source_ts, config.SOURCE_TS_PATH)
             with open(config.SOURCE_TS_PATH, 'wb') as handle:
                 pickle.dump(source_ts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -946,9 +946,9 @@ def run_workflow(PSD_target=None, model_params={}, config=None, write_files=True
     iR6 = np.where([reg6 in reg for reg in connectivity.region_labels])[0]
     iR7 = np.where([reg7 in reg for reg in connectivity.region_labels])[0]
     iR8 = np.where([reg8 in reg for reg in connectivity.region_labels])[0]
-    for i in [iR1, iR2, iR3, iR4, iR5, iR6, iR7, iR8]:
-       connectivity.weights[i,:]=0
-       connectivity.weights[:,i]=0
+    #for i in [iR1, iR2, iR3, iR4, iR5, iR6, iR7, iR8]:
+    #   connectivity.weights[i,:]=0
+    #   connectivity.weights[:,i]=0
     ######## end of cereb switch off  
     
     # Prepare model
