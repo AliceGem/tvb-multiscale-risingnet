@@ -109,6 +109,8 @@ def simulate_TVB_for_sbi_batch(iB, iG=None, config=None, write_to_file=True):
                 numpy_prior = prior
             if prior_name == "FIC":
                 config.FIC = numpy_prior
+            elif prior_name == "FIC_SPLIT":
+                config.FIC_SPLIT = numpy_prior
             else:
                 priors_params[prior_name] = numpy_prior
         if config.VERBOSE:
@@ -415,7 +417,7 @@ def plot_sbi_fit(config=None):
     return fig, axes
 
 
-def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_params={}, FIC=None):
+def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_params={}, FIC=None, FIC_SPLIT=None):
 
     config = assert_config(config, return_plotter=False)
     with open(os.path.join(config.out.FOLDER_RES, 'config.pkl'), 'wb') as file:
@@ -435,10 +437,14 @@ def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_pa
     for pname, pval in zip(config.PRIORS_PARAMS_NAMES, samples_fit[config.OPT_RES_MODE][iR]):
         if pname == "FIC":
             config.FIC = pval
+        elif pname == "FIC_SPLIT":
+            config.FIC_SPLIT = pval
         else:
             params[pname] = pval
     if FIC is not None:
         config.FIC = FIC
+    if FIC_SPLIT is not None:
+        config.FIC_SPLIT = FIC_SPLIT
     # Run one simulation with the posterior means:
     if config.VERBOSE:
         print("Simulating using the estimate of the %s of the parameters' posterior distribution!" % config.OPT_RES_MODE)
@@ -447,7 +453,10 @@ def simulate_after_fitting(iG, iR=None, config=None, workflow_fun=None, model_pa
         workflow_fun = run_workflow
     # Specify other parameters or overwrite some:
     params.update(model_params)
-    outputs = workflow_fun(plot_flag=True, model_params=params, config=config, output_folder="G_%g" % params['G'])
+    outputs = workflow_fun(plot_flag=True, model_params=params, config=None,
+                           output_folder="%s/G%g/STIM%g_Is%g_FIC%g_FIC_SPLIT%g" %
+                                         (config.output_base, params['G'], params["STIMULUS"],
+                                          params['I_s'], config.FIC, config.FIC_SPLIT))
     outputs = outputs + (samples_fit, )
     return outputs
 
@@ -483,6 +492,10 @@ if __name__ == "__main__":
         if iG == -1:
             raise ValueError("iG=-1 is not possible for running sbi_infer_for_iG!")
         samples_fit_Gs, results, fig, simulator, output_config = sbi_infer_for_iG(iG, config)
+    elif parser_args.script_id == 2:
+        simulate_after_fitting(iG, iR=None, config=config,
+                               workflow_fun=None, model_params={}, FIC=None, FIC_SPLIT=None)
     else:
         raise ValueError("Input argument script_id=%s is neither 0 for simulate_TVB_for_sbi_batch "
                          "nor 1 for sbi_infer_for_iG!")
+
