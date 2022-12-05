@@ -684,8 +684,7 @@ def compute_data_PSDs_m1s1brl(raw_results, PSD_target, inds, transient=None, wri
             plt.show()
         else:
             plt.close(fig)
-    # if write_files:
-    #     np.save
+
     return Pxx_den.flatten()
 
 
@@ -710,15 +709,13 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
         try:
             # We need framework_tvb for writing and reading from HDF5 files
             from tvb_multiscale.core.tvb.io.h5_writer import H5Writer
+            from examples.plot_write_results import write_RegionTimeSeriesXarray_to_h5
             writer = H5Writer()
         except:
             warnings.warn("H5Writer cannot be imported! Probably you haven't installed tvb_framework.")
 
-    from tvb.contrib.scripts.datatypes.time_series import TimeSeriesRegion
-    from tvb.contrib.scripts.datatypes.time_series_xarray import TimeSeriesRegion as TimeSeriesXarray
-
     # Put the results in a Timeseries instance
-    from tvb.contrib.scripts.datatypes.time_series import TimeSeriesRegion
+    from tvb.contrib.scripts.datatypes.time_series_xarray import TimeSeriesRegion as TimeSeriesXarray
 
     source_ts = None
     bold_ts = None
@@ -746,9 +743,8 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
         # Write to file
         if writer:
             try:
-                writer.write_tvb_to_h5(TimeSeriesRegion(data=source_ts._data,
-                                                        connectivity=source_ts.connectivity),
-                                    os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
+                write_RegionTimeSeriesXarray_to_h5(source_ts, writer,
+                                                   os.path.join(config.out.FOLDER_RES, source_ts.title) + ".h5")
             except Exception as e:
                     warnings.warn("Failed to to write source time series to file with error!:\n%s" % str(e))
 
@@ -762,6 +758,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
         if len(results) > 1:
             bold_ts = TimeSeriesXarray(  # substitute with TimeSeriesRegion fot TVB like functionality
                 data=results[1][1], time=results[1][0],
+                sample_period=simulator.monitors[1].period,
                 connectivity=simulator.connectivity,
                 labels_ordering=["Time", "State Variable", "Region", "Neurons"],
                 labels_dimensions={"State Variable": ["BOLD"],
@@ -770,14 +767,18 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
             outputs.append(bold_ts)
 
+            if write_files:
+                if config.VERBOSE:
+                    print("Pickle-dumping bold_ts to %s!" % config.BOLD_TS_PATH)
+                dump_picked_time_series(bold_ts, config.BOLD_TS_PATH)
+
             # bold_t = source_ts.time
 
             # Write to file
             if writer:
                 try:
-                    writer.write_tvb_to_h5(TimeSeriesRegion(data=bold_ts._data,
-                                                            connectivity=bold_ts.connectivity),
-                                        os.path.join(config.out.FOLDER_RES, bold_ts.title) + ".h5")
+                    write_RegionTimeSeriesXarray_to_h5(bold_ts._data, writer,
+                                                       os.path.join(config.out.FOLDER_RES, bold_ts.title) + ".h5")
                 except Exception as e:
                     warnings.warn("Failed to to write BOLD time series to file with error!:\n%s" % str(e))
             
@@ -812,38 +813,38 @@ def plot_tvb(transient, inds,
         source_ts[:, :, :, :].plot_timeseries(plotter_config=plotter.config,
                                               hue="Region" if source_ts.shape[2] > MAX_REGIONS_IN_ROWS else None,
                                               per_variable=source_ts.shape[1] > MAX_VARS_IN_COLS,
-                                              figsize=FIGSIZE);
+                                              figsize=FIGSIZE)
     # Focus on the m1 and s1 barrel field nodes:
     if source_ts is not None:
         source_ts_m1s1brl = source_ts[-10000:, :, inds["m1s1brl"]]
         source_ts_m1s1brl.plot_timeseries(plotter_config=plotter.config,
                                           hue="Region" if source_ts_m1s1brl.shape[2] > MAX_REGIONS_IN_ROWS else None,
                                           per_variable=source_ts_m1s1brl.shape[1] > MAX_VARS_IN_COLS,
-                                          figsize=FIGSIZE, figname="M1 and S1 barrel field nodes TVB Time Series");
-    # Focus on the the motor pathway:
+                                          figsize=FIGSIZE, figname="M1 and S1 barrel field nodes TVB Time Series")
+    # Focus on the motor pathway:
     if source_ts is not None:
         source_ts_motor = source_ts[-10000:, :, inds["motor"]]
         source_ts_motor.plot_timeseries(plotter_config=plotter.config,
                                         hue="Region" if source_ts_motor.shape[2] > MAX_REGIONS_IN_ROWS else None,
                                         per_variable=source_ts_motor.shape[1] > MAX_VARS_IN_COLS,
-                                        figsize=FIGSIZE, figname="Motor pathway TVB Time Series");
-    # Focus on the motor pathway: raster plot
-    if source_ts_motor is not None and source_ts_motor.number_of_labels > MIN_REGIONS_FOR_RASTER_PLOT:
-        source_ts_motor.plot_raster(plotter_config=plotter.config,
-                                    per_variable=source_ts_motor.shape[1] > MAX_VARS_IN_COLS,
-                                    figsize=FIGSIZE, figname="Motor pathway TVB Time Series Raster");
+                                        figsize=FIGSIZE, figname="Motor pathway TVB Time Series")
+
     # Focus on the sensory pathway:
     if source_ts is not None:
         source_ts_sens = source_ts[-10000:, :, inds["sens"]]
         source_ts_sens.plot_timeseries(plotter_config=plotter.config,
                                        hue="Region" if source_ts_sens.shape[2] > MAX_REGIONS_IN_ROWS else None,
                                        per_variable=source_ts_sens.shape[1] > MAX_VARS_IN_COLS,
-                                       figsize=FIGSIZE, figname="Sensory pathway TVB Time Series");
-    # Focus on the sensory pathway: raster plot
-    if source_ts is not None and source_ts_sens.number_of_labels > MIN_REGIONS_FOR_RASTER_PLOT:
-        source_ts_sens.plot_raster(plotter_config=plotter.config,
-                                   per_variable=source_ts_sens.shape[1] > MAX_VARS_IN_COLS,
-                                   figsize=FIGSIZE, figname="Sensory pathway TVB Time Series Raster");
+                                       figsize=FIGSIZE, figname="Sensory pathway TVB Time Series")
+
+    # Focus on regions potentially modelled in NEST (ansiform lobule, interposed nucleus, inferior olive):
+    if source_ts is not None:
+        source_ts_cereb = source_ts[-10000:, :, inds["cereb"]]
+        source_ts_cereb.plot_timeseries(plotter_config=plotter.config,
+                                       hue="Region" if source_ts_cereb.shape[2] > MAX_REGIONS_IN_ROWS else None,
+                                       per_variable=source_ts_cereb.shape[1] > MAX_VARS_IN_COLS,
+                                       figsize=FIGSIZE, figname="Cerebellum TVB Time Series")
+
     # bold_ts TVB time series
     if bold_ts is not None:
         bold_ts.plot_timeseries(plotter_config=plotter.config,
@@ -988,6 +989,7 @@ def run_workflow(PSD_target=None, model_params={}, config=None, write_files=True
     if config.VERBOSE:
         print("\nFinished TVB workflow in %g sec!\n" % (time.time() - tic))
     return outputs
+
 
 if __name__ == "__main__":
     parser = args_parser("tvb_script")
