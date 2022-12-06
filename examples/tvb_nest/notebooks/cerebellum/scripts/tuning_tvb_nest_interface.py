@@ -10,16 +10,16 @@ from examples.tvb_nest.notebooks.cerebellum.scripts.nest_script import build_NES
 
 model_params = {'STIMULUS': 0.0}        # Tuning is done at baseline
 
-tuned_values = [10, 50, 100]
+tuned_values = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]
 
-tuned_value = 120
+tuned_value = 1
 
-# Get configurati
+# Get configuration
 config, plotter = configure(output_folder=str(tuned_value)+'_', verbose=2)
 print("config.NEST_PERIPHERY",config.NEST_PERIPHERY)
 config.model_params.update(model_params)
-config.SIMULATION_LENGTH = 8000
-config.TRANSIENT_RATIO = 0.25
+config.SIMULATION_LENGTH = 20000
+config.TRANSIENT_RATIO = 0.5
 # Load and prepare connectome and connectivity with all possible normalizations:
 connectome, major_structs_labels, voxel_count, inds, maps = prepare_connectome(config, plotter=plotter)
 connectivity = build_connectivity(connectome, inds, config)

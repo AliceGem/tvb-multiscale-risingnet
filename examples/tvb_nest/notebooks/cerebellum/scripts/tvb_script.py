@@ -756,13 +756,15 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
         # t = source_ts.time
 
         if len(results) > 1:
+            print("results [1] inside tvb_script ", results[1])
             bold_ts = TimeSeriesXarray(  # substitute with TimeSeriesRegion fot TVB like functionality
                 data=results[1][1], time=results[1][0],
                 sample_period=simulator.monitors[1].period,
                 connectivity=simulator.connectivity,
                 labels_ordering=["Time", "State Variable", "Region", "Neurons"],
                 labels_dimensions={"State Variable": ["BOLD"],
-                                   "Region": simulator.connectivity.region_labels.tolist()})
+                                   "Region": simulator.connectivity.region_labels.tolist()},
+                sample_period=simulator.monitors[1].period)
             bold_ts.configure()
 
             outputs.append(bold_ts)

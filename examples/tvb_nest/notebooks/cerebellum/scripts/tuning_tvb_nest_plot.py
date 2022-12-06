@@ -12,11 +12,15 @@ from examples.tvb_nest.notebooks.cerebellum.utils import  compute_plot_selected_
 
 cells = ['golgi', 'granule', 'purkinje', 'basket', 'stellate', 'dcn', 'dcn_gaba', 'io', 'glom', 'mossy']
 half = ['right', 'left']
+
+SIM_DURATION = 30000
+TRANSIENT = 10000
 # Load files
 avg_frequency = {}
-path = 'outputs/100__FIC/res/nest_recordings/'
+path_nest = 'outputs/.85_/res/nest_recordings/'
+path = 'outputs/.85_/res/'
 
-os.chdir(path)
+os.chdir(path_nest)
 list_files = glob.glob("*.dat")
 
 print(list_files)
@@ -39,4 +43,13 @@ for cell in cells:
         nh+=1
     nc+=1
 
-print(avg_frequency['mossy'])
+print(avg_frequency['mossy'])   
+
+# NEST to TVB
+regs = [['Right Ansiform lobule', 'Left Ansiform lobule'],
+            ['Right Interposed nucleus', 'Left Interposed nucleus'],
+            ['Right Inferior olivary complex', 'Left Inferior olivary complex']]
+
+
+import pickle
+pickle.load(path+'tvb_serial_cosimulator.pickle')

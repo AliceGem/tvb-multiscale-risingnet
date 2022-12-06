@@ -153,7 +153,7 @@ def configure(**ARGS):
     config.NEST_STIMULUS = 15.0  # Hz
     # Monitors:
     config.RAW_PERIOD = 1.0
-    config.BOLD_PERIOD = 1024.0  # 1024.0 or None, If None, BOLD will not be computed
+    config.BOLD_PERIOD = None       # 1024.0 or None, If None, BOLD will not be computed
 
     # ...and fitting
     config.FIC = args['FIC']
