@@ -348,7 +348,7 @@ def load_posterior_samples_all_Gs(iGs=None, runs=None, label="", config=None):
             else:
                 samples[G] = load_posterior_samples_all_runs(iG, runs, label, config=config)
         except Exception as e:
-            warnings.warn("Failed to load posterior samples for iG=%d, G=%g!\n%s" % (iG, G, str(e)))
+            warnings.warn("Failed to load posterior samples for iG=%d, G=%g!\n%s" % (iG, config.Gs[iG], str(e)))
     return samples
 
 
