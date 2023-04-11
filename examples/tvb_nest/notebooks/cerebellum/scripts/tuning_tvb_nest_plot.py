@@ -6,19 +6,19 @@ import os, glob
 import matplotlib.pyplot as plt
 
 from examples.tvb_nest.notebooks.cerebellum.scripts.nest_utils import *
-from examples.tvb_nest.notebooks.cerebellum.scripts.scripts import *
+#from examples.tvb_nest.notebooks.cerebellum.scripts.scripts import *
 from examples.tvb_nest.notebooks.cerebellum.utils import  compute_plot_selected_spectra_coherence, only_plot_selected_spectra_coherence_and_diff
 
 
-cells = ['golgi', 'granule', 'purkinje', 'basket', 'stellate', 'dcn', 'dcn_gaba', 'io', 'glom', 'mossy']
+cells = ['golgi']   #, 'granule', 'purkinje', 'basket', 'stellate', 'dcn', 'dcn_gaba', 'io', 'glom', 'mossy']
 half = ['right', 'left']
 
-SIM_DURATION = 30000
-TRANSIENT = 10000
+SIM_DURATION = 1000
+TRANSIENT = 500
 # Load files
 avg_frequency = {}
-path_nest = 'outputs/.85_/res/nest_recordings/'
-path = 'outputs/.85_/res/'
+path_nest = 'outputs/0.1_/res/nest_recordings/'
+path = 'outputs/0.1_/'
 
 os.chdir(path_nest)
 list_files = glob.glob("*.dat")
@@ -31,19 +31,24 @@ for cell in cells:
     for h in half: 
         print(cell, nh, nc)
         spikes = np.loadtxt(os.getcwd()+"/"+list_files[nc+nh],skiprows=3)
-        current_frequency = compute_frequency_signal(spikes, duration=10000, cutoff=0)
-        plt.plot(current_frequency)
+        # to use Denis functions (call Denis 11/01/2023): # nest_network.output_devices['E']['bankssts_L'].number_of_neurons
+                                # nest_network.output_devices['E']['bankssts_L'].spikes_times
+        current_frequency = compute_frequency_signal(spikes, duration=SIM_DURATION, cutoff=0)
+        img=plt.plot(current_frequency)
         plt.title("Full signal "+h+" "+cell)
         plt.show()
-        current_frequency = compute_frequency_signal(spikes, duration=10000, cutoff=8000)
+        plt.savefig(h+'.png')
+        img.write_image(h+'.png')
+        current_frequency = compute_frequency_signal(spikes, duration=SIM_DURATION, cutoff=TRANSIENT)
         plt.title("Removed transient "+h+" "+cell)
         plt.plot(current_frequency)
-        plt.show()
+        #plt.show()
+        plt.savefig('rem_transient_fig.png')
         avg_frequency[cells[nc]].append(np.mean(current_frequency))
         nh+=1
     nc+=1
 
-print(avg_frequency['mossy'])   
+#print(avg_frequency['mossy'])   
 
 # NEST to TVB
 regs = [['Right Ansiform lobule', 'Left Ansiform lobule'],
@@ -52,4 +57,4 @@ regs = [['Right Ansiform lobule', 'Left Ansiform lobule'],
 
 
 import pickle
-pickle.load(path+'tvb_serial_cosimulator.pickle')
+#pickle.load(path+'tvb_serial_cosimulator.pickle')

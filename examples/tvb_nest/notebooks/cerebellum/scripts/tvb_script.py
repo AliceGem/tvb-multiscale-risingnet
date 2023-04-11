@@ -349,7 +349,7 @@ def apply_fic(simulator, inds, FIC, G=None, param='w_ie', plotter=None):
 def build_simulator(connectivity, model, inds, maps, config, plotter=None):
     from tvb_multiscale.core.tvb.cosimulator.cosimulator_serial import CoSimulatorSerial
     from tvb_multiscale.core.tvb.cosimulator.models.wc_thalamocortical_cereb import SigmoidalPreThalamoCortical
-    from tvb.simulator.monitors import Raw, Bold, TemporalAverage
+    from tvb.simulator.monitors import Raw, Bold, TemporalAverage, AfferentCoupling, AfferentCouplingTemporalAverage
 
     simulator = CoSimulatorSerial()
 
@@ -455,15 +455,18 @@ def build_simulator(connectivity, model, inds, maps, config, plotter=None):
     # Set monitors:
     if config.RAW_PERIOD > config.DEFAULT_DT:
         mon_raw = TemporalAverage(period=config.RAW_PERIOD)  # ms
+        afferent = AfferentCouplingTemporalAverage(period=config.RAW_PERIOD)
     else:
         mon_raw = Raw()
+        afferent = AfferentCoupling()
     if config.BOLD_PERIOD:
         bold = Bold(period=config.BOLD_PERIOD,
                     variables_of_interest=np.array([2]))
-        simulator.monitors = (mon_raw, bold)
+        simulator.monitors = (mon_raw, bold, afferent)
     else:
-        simulator.monitors = (mon_raw,)
-
+        simulator.monitors = (mon_raw,afferent)
+    
+    
     simulator.configure()
 
     simulator.integrate_next_step = simulator.integrator.integrate_with_update
@@ -719,6 +722,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
     source_ts = None
     bold_ts = None
+    afferent_ts = None
 
     outputs = []
     if results is not None:
@@ -732,6 +736,16 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
 
         source_ts.configure()
 
+        afferent_ts = TimeSeriesXarray(  # substitute with TimeSeriesRegion fot TVB like functionality
+            data=results[-1][1], time=results[-1][0],
+            connectivity=simulator.connectivity,
+            labels_ordering=["Time", "State Variable", "Region", "Neurons"],
+            labels_dimensions={"State Variable": ["coupling"],
+                               "Region": simulator.connectivity.region_labels.tolist()},
+            sample_period=simulator.integrator.dt)
+
+        afferent_ts.configure()
+        
         if write_files:
             import pickle
             if config.VERBOSE:
@@ -739,6 +753,8 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             #dump_picked_time_series(source_ts, config.SOURCE_TS_PATH)
             with open(config.SOURCE_TS_PATH, 'wb') as handle:
                 pickle.dump(source_ts, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open(config.AFFERENT_TS_PATH, 'wb') as handle:
+                pickle.dump(afferent_ts, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
         # Write to file
         if writer:
@@ -752,6 +768,7 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             print("Raw ts:\n%s" % str(source_ts))
 
         outputs.append(source_ts)
+        
 
         # t = source_ts.time
 
@@ -759,7 +776,6 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             print("results [1] inside tvb_script ", results[1])
             bold_ts = TimeSeriesXarray(  # substitute with TimeSeriesRegion fot TVB like functionality
                 data=results[1][1], time=results[1][0],
-                sample_period=simulator.monitors[1].period,
                 connectivity=simulator.connectivity,
                 labels_ordering=["Time", "State Variable", "Region", "Neurons"],
                 labels_dimensions={"State Variable": ["BOLD"],
@@ -786,12 +802,13 @@ def tvb_res_to_time_series(results, simulator, config=None, write_files=True):
             
             if config.VERBOSE > 1:
                 print("BOLD ts:\n%s" % str(bold_ts))
-
+        
+        outputs.append(afferent_ts)
     return tuple(outputs)
 
 
 def plot_tvb(transient, inds,
-             results=None, source_ts=None, bold_ts=None,
+             results=None, source_ts=None, bold_ts=None, afferent_ts=None,
              simulator=None, plotter=None, config=None, write_files=True):
     if plotter is None:
         config, plotter = assert_config(config, return_plotter=True)
@@ -809,6 +826,7 @@ def plot_tvb(transient, inds,
         source_ts = results[0]
         if len(results) > 1:
             bold_ts = results[1]
+            afferent_ts = results[-1]
 
     # Plot TVB time series
     if source_ts is not None:
@@ -847,6 +865,22 @@ def plot_tvb(transient, inds,
                                        per_variable=source_ts_cereb.shape[1] > MAX_VARS_IN_COLS,
                                        figsize=FIGSIZE, figname="Cerebellum TVB Time Series")
 
+    # Focus on the s1 barrel field nodes:
+    if afferent_ts is not None:
+        afferent_ts_m1s1brl = afferent_ts[-10000:, :, inds["s1brlthal"]]
+        afferent_ts_m1s1brl.plot_timeseries(plotter_config=plotter.config,
+                                          hue="Region" if afferent_ts_m1s1brl.shape[2] > MAX_REGIONS_IN_ROWS else None,
+                                          per_variable=afferent_ts_m1s1brl.shape[1] > MAX_VARS_IN_COLS,
+                                          figsize=FIGSIZE, figname="S1 barrel field nodes TVB Time Series")
+   # Focus on regions potentially modelled in NEST (ansiform lobule, interposed nucleus, inferior olive):
+    if afferent_ts is not None:
+        afferent_ts_cereb = afferent_ts[-10000:, :, inds["ansilob"]]
+        afferent_ts_cereb.plot_timeseries(plotter_config=plotter.config,
+                                       hue="Region" if afferent_ts_cereb.shape[2] > MAX_REGIONS_IN_ROWS else None,
+                                       per_variable=afferent_ts_cereb.shape[1] > MAX_VARS_IN_COLS,
+                                       figsize=FIGSIZE, figname="Ansiform Lobule TVB Afferent Time Series")
+    
+    
     # bold_ts TVB time series
     if bold_ts is not None:
         bold_ts.plot_timeseries(plotter_config=plotter.config,
@@ -983,7 +1017,7 @@ def run_workflow(PSD_target=None, model_params={}, config=None, write_files=True
         PSD = compute_data_PSDs_1D(results[0], PSD_target, inds, transient, plotter=plotter)
     outputs = (PSD, results, transient, simulator, config)
     if plotter is not None:
-        outputs = outputs + plot_tvb(transient, inds, results=results, source_ts=None, bold_ts=None,
+        outputs = outputs + plot_tvb(transient, inds, results=results, source_ts=None, bold_ts=None, afferent_ts=None,
                                      simulator=simulator, plotter=plotter, config=config, write_files=write_files)
     else:
         if write_files:

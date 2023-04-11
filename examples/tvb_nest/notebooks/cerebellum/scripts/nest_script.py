@@ -62,7 +62,7 @@ neuron_param = {
                       'A1': 176.358, 'A2': 176.358,
                       'E_rev1': Erev_exc, 'E_rev2': Erev_inh, 'E_rev3': Erev_exc, 'tau_syn1': tau_exc['dcnp'],
                       'tau_syn2': tau_inh['dcnp']},
-    'io_cell': {'t_ref': 1.0, 'C_m': 189.0, 'tau_m': 11.0, 'V_th': -35.0, 'V_reset': -45.0, 'Vinit': -45.0,
+    'io_cell': {'t_ref': 1.0, 'C_m': 189.0, 'tau_m': 11.0, 'V_th': 35.0, 'V_reset': -45.0, 'Vinit': -45.0,
                 'E_L': -45.0,
                 'lambda_0': 1.2, 'tau_V': 0.8, 'I_e': -18.01, 'kadap': 1.928, 'k1': 0.191, 'k2': 0.091,
                 'A1': 1810.923, 'A2': 1358.197,
@@ -197,7 +197,7 @@ def build_NEST_network(config=None):
     from tvb_multiscale.tvb_nest.nest_models.region_node import NESTRegionNode
     from tvb_multiscale.tvb_nest.nest_models.population import NESTPopulation
     from tvb_multiscale.core.spiking_models.devices import DeviceSet
-    from tvb_multiscale.tvb_nest.nest_models.devices import NESTSpikeRecorder  # , NESTMultimeter
+    from tvb_multiscale.tvb_nest.nest_models.devices import NESTSpikeRecorder, NESTMultimeter
     from tvb_multiscale.tvb_nest.nest_models.devices import NESTPoissonGenerator
     from tvb_multiscale.tvb_nest.nest_models.builders.nest_factory import load_nest, configure_nest_kernel
 
@@ -246,7 +246,7 @@ def build_NEST_network(config=None):
     # First configure NEST kernel:
     nest.ResetKernel()
     nest.set_verbosity('M_ERROR')
-    nest.SetKernelStatus({"overwrite_files": True, "data_path": "sim_data/", "resolution": 0.05})
+    nest.SetKernelStatus({"overwrite_files": True, "data_path": "sim_data/", "resolution": 0.1})    #0.05})
 
     if config.VERBOSE:
         print("Building NESTNetwork...")
@@ -422,11 +422,13 @@ def build_NEST_network(config=None):
     # Create output, measuring devices, spike_recorders and multimeters measuring V_m:
     params_spike_recorder = config.NEST_OUTPUT_DEVICES_PARAMS_DEF["spike_recorder"].copy()
     params_spike_recorder["record_to"] = "ascii"
-    # params_multimeter = config.NEST_OUTPUT_DEVICES_PARAMS_DEF["multimeter"].copy()
-    # params_multimeter["record_to"] = "ascii"
-    # params_multimeter["interval"] = 1.0
+    params_multimeter = config.NEST_OUTPUT_DEVICES_PARAMS_DEF["multimeter"].copy()
+    #params_multimeter["record_to"] = "ascii"
+    #params_multimeter["record_from"] = ["V_m"]      #, "g_1__X__rec1_spikes", "g_2__X__rec2_spikes", "g_3__X__rec3_spikes"]  
+    #params_multimeter["interval"] = 1.0
     for pop, regions in neuron_types_to_region.items():
-        # pop_ts = "%s_ts" % pop
+        
+       # pop_ts = "%s_ts" % pop
         nest_network.output_devices[pop] = DeviceSet(label=pop, model="spike_recorder")
 
         for region in regions:
@@ -442,17 +444,17 @@ def build_NEST_network(config=None):
             if config.VERBOSE > 1:
                 print("\n...created spike_recorder device for population %s in brain region %s..." % (pop, region))
 
-        # if pop not in ['mossy_fibers', "whisking_stimulus"]:
-        #     nest_network.output_devices[pop_ts] = DeviceSet(label=pop_ts, model="multimeter")
-        #     # Create and connect population multimeter for this region:
-        #     nest_network.output_devices[pop_ts][region] = \
-        #         NESTMultimeter(nest.Create("multimeter", 1, params=params_multimeter),
-        #                        nest, model="multimeter", label=pop_ts, brain_region=region)
-        #     nest.Connect(nest_network.output_devices[pop_ts][region].device,
-        #                  nest_network.brain_regions[region][pop].nodes)
-        #     nest_network.output_devices[pop_ts].update()  # update DeviceSet after the new NESTDevice entry
-        #     if config.VERBOSE > 1:
-        #         print("\n...created multimeter device for population %s in brain region %s..." % (pop_ts, region))
+        #if pop not in ['mossy_fibers', "whisking_stimulus"]:
+        #    nest_network.output_devices[pop_ts] = DeviceSet(label=pop_ts, model="multimeter")
+        #    # Create and connect population multimeter for this region:
+        #    nest_network.output_devices[pop_ts][region] = \
+        #        NESTMultimeter(nest.Create("multimeter", 1, params=params_multimeter),
+        #                       nest, model="multimeter", label=pop_ts, brain_region=region)
+        #    nest.Connect(nest_network.output_devices[pop_ts][region].device,
+        #                 nest_network.brain_regions[region][pop].nodes)
+        #    nest_network.output_devices[pop_ts].update()  # update DeviceSet after the new NESTDevice entry
+        #    if config.VERBOSE > 1:
+        #        print("\n...created multimeter device for population %s in brain region %s..." % (pop_ts, region))
 
     nest_network.configure()
     if config.VERBOSE > 1:

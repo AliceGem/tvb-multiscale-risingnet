@@ -93,7 +93,7 @@ def build_tvb_nest_interfaces(simulator, nest_network, nest_nodes_inds, config, 
 
     # from tvb_multiscale.core.interfaces.tvb.interfaces import TVBtoSpikeNetModels
 
-    max_rate = 100.0  #Hz
+    max_rate = max_rate_to_tune         #100.0  #Hz
     # if tvb_spikeNet_model_builder.default_coupling_mode == "TVB":
     #     proxy_inds = nest_nodes_inds
     # else:
@@ -111,7 +111,7 @@ def build_tvb_nest_interfaces(simulator, nest_network, nest_nodes_inds, config, 
         for region in regions:
             pop_regions_inds.append(np.where(simulator.connectivity.region_labels == region)[0][0])
         pop_regions_inds = np.array(pop_regions_inds)
-        tvb_spikeNet_model_builder.output_interfaces.append(
+        tvb_spikeNet_model_builder.output_interfaces.append(        
             {'voi': np.array(["E"]),  # TVB state variable to get data from
              'populations': np.array([pop]),  # NEST populations to couple to
               # --------------- Arguments that can default if not given by the user:------------------------------

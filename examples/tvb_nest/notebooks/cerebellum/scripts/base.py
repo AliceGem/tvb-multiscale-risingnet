@@ -30,7 +30,7 @@ DEFAULT_ARGS = {'G': 1.0, 'STIMULUS': 0.1,
 def create_plotter(config):
     from tvb_multiscale.core.plot.plotter import Plotter
     config.figures.SHOW_FLAG = True
-    config.figures.SAVE_FLAG = True
+    config.figures.SAVE_FLAG = False
     config.figures.FIG_FORMAT = 'png'
     config.figures.DEFAULT_SIZE = config.figures.NOTEBOOK_SIZE
     return config, Plotter(config.figures)
@@ -116,9 +116,10 @@ def configure(**ARGS):
     config.SIMULATION_LENGTH = 2**10 + 1.0  # Testing: 10: 1025, 11: 2049.0, Fitting: 12: 4097.0, BOLD: 16: 65537
     config.TRANSIENT_RATIO = 0.1
     config.NEST_PERIPHERY = False
-    config.INVERSE_SIGMOIDAL_NEST_TO_TVB = True
+    config.INVERSE_SIGMOIDAL_NEST_TO_TVB = False        #True
     config.SOURCE_TS_PATH = os.path.join(config.out.FOLDER_RES, "source_ts.pkl")
     config.BOLD_TS_PATH = os.path.join(config.out.FOLDER_RES, "bold_ts.pkl")
+    config.AFFERENT_TS_PATH = os.path.join(config.out.FOLDER_RES, "afferent_ts.pkl")
 
     # Connectivity
     config.CONN_SPEED = 3.0

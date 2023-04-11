@@ -6,19 +6,19 @@ from tvb_multiscale.core.plot.plotter import Plotter
 
 # Run the cosimulation
 # results, transient, simulator, nest_network, PSD = run_tvb_nest_workflow(model_params = {'G':1}) - not working: TO FIX
-from examples.tvb_nest.notebooks.cerebellum.scripts.nest_script import build_NEST_network, plot_nest_results
+from examples.tvb_nest.notebooks.cerebellum.scripts.nest_script import build_NEST_network, plot_nest_results_raster
 
-model_params = {'STIMULUS': 0.0}        # Tuning is done at baseline
+model_params = {'STIMULUS': 5.0, 'G': 6}        # Tuning is done at baseline
 
 tuned_values = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]
 
-tuned_value = 1
+tuned_value = 0.1
 
 # Get configuration
-config, plotter = configure(output_folder=str(tuned_value)+'_', verbose=2)
+config, plotter = configure(output_folder=str(tuned_value)+'_stimON_5', verbose=2)
 print("config.NEST_PERIPHERY",config.NEST_PERIPHERY)
 config.model_params.update(model_params)
-config.SIMULATION_LENGTH = 20000
+config.SIMULATION_LENGTH = 10000
 config.TRANSIENT_RATIO = 0.5
 # Load and prepare connectome and connectivity with all possible normalizations:
 connectome, major_structs_labels, voxel_count, inds, maps = prepare_connectome(config, plotter=plotter)
@@ -33,7 +33,7 @@ simulator, nest_network = build_tvb_nest_interfaces(simulator, nest_network, nes
 # Simulate TVB-NEST model
 results, transient, simulator, nest_network = simulate_tvb_nest(simulator, nest_network, config)
 
-        
+       
 # Plot results
 # plot_tvb(transient, inds, results=results,
 #            source_ts=None, bold_ts=None, PSD_target=PSD_target, PSD=PSD,
